@@ -9,6 +9,7 @@
 credentials.json
 secrets.json
 .claude/settings.local.json
+.claude/agent-memory/
 
 # Python
 __pycache__/
