@@ -1,4 +1,5 @@
-# Источники выключены до реализации адаптеров и локальных HTML-fixture тестов.
+# Источник включается только после реализации его адаптера и локальных HTML-fixture тестов.
+# bg24 остаётся выключенным: адаптер bg24_homepage ещё не реализован.
 sources:
   - id: flagman
     name: Flagman
@@ -8,7 +9,7 @@ sources:
         url: https://www.flagman.bg/
     adapter_type: flagman_homepage
     language: bg
-    enabled: false
+    enabled: true
     min_interval_minutes: 20
     inclusion_rules:
       topics: [Bulgaria and EU, migration and residency, legislation and administration, taxes business and real estate, Burgas region, prices healthcare and education, events affecting foreigners]
