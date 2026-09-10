@@ -1,0 +1,67 @@
+# Secrets (the example must contain empty values only)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+secrets.json
+.claude/settings.local.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+env/
+.Python
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
+*.egg-info/
+.coverage
+.coverage.*
+htmlcov/
+
+# Node.js and build output
+node_modules/
+.npm/
+.pnpm-store/
+.yarn/cache/
+.next/
+.nuxt/
+coverage/
+dist/
+build/
+*.tsbuildinfo
+
+# Editor, Windows and temporary files
+.vscode/
+*.code-workspace
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+*.stackdump
+*.swp
+*.swo
+*.tmp
+*.bak
+.cache/
+.tmp/
+
+# Local logs and run reports
+*.log
+logs/
+docs/runs/*.txt
+!docs/runs/.gitkeep
+
+# Local MVP database
+data/*.db
+data/*.db-shm
+data/*.db-wal
