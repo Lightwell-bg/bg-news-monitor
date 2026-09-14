@@ -71,6 +71,8 @@ config/runtime.yaml
 AGENTS.md
 CLAUDE.md
 AI_DEV_TEAM_GUIDE.md
+docs/
+scripts/
 
 # Local MVP database
 data/*.db
