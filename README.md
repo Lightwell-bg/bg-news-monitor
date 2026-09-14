@@ -133,6 +133,51 @@ pytest
 - `.env` и токены здесь не редактируются и не отображаются;
 - callback-данные кнопок укладываются в лимит Telegram в 64 байта, а длинные экраны обрезаются по строкам.
 
+## Деплой на VPS через Docker
+
+Сервис не открывает HTTP-порты: он работает через Telegram long polling. На VPS с уже
+установленными Docker и Docker Compose клонируйте public-репозиторий под пользователем,
+который будет обслуживать проект (в примерах — `vlad`):
+
+```bash
+sudo mkdir -p /opt/bg-news-monitor
+sudo chown vlad:vlad /opt/bg-news-monitor
+git clone https://github.com/Lightwell-bg/bg-news-monitor.git /opt/bg-news-monitor
+cd /opt/bg-news-monitor
+```
+
+Создайте секретный файл конфигурации и заполните обязательные значения из таблицы выше.
+Для первого запуска оставьте `DRY_RUN=true`:
+
+```bash
+cp .env.example .env
+nano .env
+sudo docker compose up -d --build
+sudo docker compose ps
+sudo docker compose logs -f --tail=100 news-monitor
+```
+
+Остановка просмотра логов через `Ctrl+C` не останавливает контейнер. Сам сервис остановить
+можно командой:
+
+```bash
+sudo docker compose down
+```
+
+Каталог `data/` не удаляйте: в нём хранятся SQLite, сохранённые через Telegram источники и
+runtime-настройки. Они переживают пересборку и обновление контейнера.
+
+### Обновление на VPS
+
+После push новой версии в GitHub:
+
+```bash
+cd /opt/bg-news-monitor
+git pull --ff-only
+sudo docker compose up -d --build
+sudo docker compose logs --tail=100 news-monitor
+```
+
 ## Безопасность и качество
 
 - Управляющие кнопки и команды управления источниками доступны только числовым ID из `TELEGRAM_ADMIN_IDS`; права проверяются и фильтром роутера, и сервисом.
@@ -142,5 +187,3 @@ pytest
 - Черновик с дословной копией статьи или с числами, которых нет в источнике, отклоняется кодом.
 - Ссылка на исходный материал обязательна в публикации.
 - Токены и ключи берутся только из окружения, маскируются в логах и не попадают в отчёты.
-
-См. [архитектуру](docs/architecture.md) и [задачу](docs/current-task.md).
