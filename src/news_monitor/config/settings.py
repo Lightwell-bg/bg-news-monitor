@@ -52,6 +52,9 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         case_sensitive=False,
+        # A value changed at runtime (the importance threshold) must pass the
+        # same field constraints as one loaded from the environment.
+        validate_assignment=True,
     )
 
     telegram_bot_token: SecretStr = Field(default=SecretStr(""))

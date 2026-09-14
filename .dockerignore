@@ -1,0 +1,17 @@
+.git
+.claude
+.codex
+.venv
+.pytest_cache
+.tmp
+__pycache__
+*.py[cod]
+
+.env
+.env.*
+data
+config/runtime.yaml
+
+docs
+tests
+scripts

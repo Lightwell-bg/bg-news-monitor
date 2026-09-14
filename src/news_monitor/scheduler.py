@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -30,7 +31,12 @@ class PipelineScheduler:
     def scheduler(self) -> AsyncIOScheduler:
         return self._scheduler
 
-    def _remove_existing(self, job_id: str) -> None:
+    @staticmethod
+    def job_id(source_id: str) -> str:
+        """Return the single job id used for one source."""
+        return f"pipeline:{source_id}"
+
+    def _remove_existing(self, job_id: str) -> bool:
         """Drop a job with the same id, including one still pending a start.
 
         APScheduler only honours replace_existing for a persistent jobstore, so
@@ -40,12 +46,20 @@ class PipelineScheduler:
         try:
             self._scheduler.remove_job(job_id)
         except JobLookupError:
-            return
+            return False
+        return True
+
+    def remove_pipeline(self, source_id: str) -> bool:
+        """Stop polling one source. Returns True when a job was really removed."""
+        removed = self._remove_existing(self.job_id(source_id))
+        if removed:
+            logger.info("source %s is no longer scheduled", source_id)
+        return removed
 
     def add_pipeline(self, pipeline: NewsPipeline) -> int:
         """Register one pipeline and return the interval used, in minutes."""
         minutes = effective_interval_minutes(pipeline, self._settings)
-        job_id = f"pipeline:{pipeline.source.id}"
+        job_id = self.job_id(pipeline.source.id)
         self._remove_existing(job_id)
 
         async def _job() -> None:
@@ -61,6 +75,7 @@ class PipelineScheduler:
             replace_existing=True,
             max_instances=1,
             coalesce=True,
+            next_run_time=datetime.now(UTC),
         )
         logger.info(
             "source %s scheduled every %s minutes", pipeline.source.id, minutes

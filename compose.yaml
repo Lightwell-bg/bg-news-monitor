@@ -1,0 +1,15 @@
+services:
+  news-monitor:
+    build:
+      context: .
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      # Keep mutable SQLite and Telegram-admin configuration outside the image.
+      DATABASE_URL: sqlite+aiosqlite:////app/data/news.db
+      SOURCES_FILE: /app/data/sources.yaml
+    volumes:
+      - ./data:/app/data
+    stop_grace_period: 30s

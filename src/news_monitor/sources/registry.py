@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from news_monitor.sources.base import SourceAdapter
+from news_monitor.sources.bg24 import Bg24HomepageAdapter
 from news_monitor.sources.flagman import FlagmanHomepageAdapter
 
 _ADAPTERS: dict[str, type] = {
+    Bg24HomepageAdapter.adapter_type: Bg24HomepageAdapter,
     FlagmanHomepageAdapter.adapter_type: FlagmanHomepageAdapter,
 }
 

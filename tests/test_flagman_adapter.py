@@ -45,6 +45,19 @@ def test_listing_deduplicates_normalized_links() -> None:
     assert len(urls) == len(set(urls))
 
 
+def test_listing_skips_empty_generic_content_container() -> None:
+    html = """
+    <html><body>
+      <span class="content"><i>metadata</i></span>
+      <div><a href="/article/389633">Новина</a></div>
+    </body></html>
+    """
+
+    items = adapter().parse_listing(html, HOMEPAGE_URL)
+
+    assert [item.url for item in items] == ["https://flagman.bg/article/389633"]
+
+
 def test_listing_strips_tracking_parameters() -> None:
     urls = [
         item.url

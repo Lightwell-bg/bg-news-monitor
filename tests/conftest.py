@@ -37,6 +37,52 @@ SECOND_ADMIN_ID = 444555666
 STRANGER_ID = 999888777
 CHANNEL_ID = "@test_channel"
 
+#: A complete, valid sources file used by the administration tests. It is always
+#: written into tmp_path: the tests never touch the real config/sources.yaml.
+SAMPLE_SOURCES_YAML = """\
+# Тестовый файл источников.
+# Комментарий должен пережить перезапись.
+sources:
+  - id: flagman
+    name: Flagman
+    base_url: https://www.flagman.bg/
+    sections:
+      - name: Главная страница
+        url: https://www.flagman.bg/
+    adapter_type: flagman_homepage
+    language: bg
+    enabled: true
+    min_interval_minutes: 20
+    inclusion_rules:
+      topics: [migration and residency, legislation and administration]
+    exclusion_rules:
+      topics: [sport, advertising]
+  - id: bg24
+    name: BG24
+    base_url: https://bg-24.com/
+    sections:
+      - name: Главная страница
+        url: https://bg-24.com/
+    adapter_type: bg24_homepage
+    language: bg
+    enabled: false
+    min_interval_minutes: 30
+    inclusion_rules:
+      topics: [Bulgaria and EU]
+    exclusion_rules:
+      topics: [clickbait]
+  - id: legacy
+    name: Legacy
+    base_url: https://legacy.example.com/
+    sections:
+      - name: Главная страница
+        url: https://legacy.example.com/
+    adapter_type: legacy_homepage
+    language: bg
+    enabled: false
+    min_interval_minutes: 60
+"""
+
 
 def fixture_html(name: str) -> str:
     """Read a local HTML fixture."""
@@ -172,6 +218,14 @@ async def repository() -> NewsRepository:
 @pytest.fixture
 def fake_bot() -> FakeBot:
     return FakeBot()
+
+
+@pytest.fixture
+def sources_file(tmp_path) -> Path:
+    """A temporary, valid sources.yaml owned by one test."""
+    path = tmp_path / "sources.yaml"
+    path.write_text(SAMPLE_SOURCES_YAML, encoding="utf-8")
+    return path
 
 
 @pytest.fixture

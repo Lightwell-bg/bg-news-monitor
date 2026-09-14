@@ -7,25 +7,24 @@ import logging
 from aiogram import Bot, Dispatcher, Router
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.filters import BaseFilter
-from aiogram.types import CallbackQuery
+from aiogram.types import BotCommand, BotCommandScopeChat, CallbackQuery
 
 from news_monitor.config.settings import Settings
 from news_monitor.telegram.card import build_keyboard, parse_callback_data, render_admin_card
+from news_monitor.telegram.filters import AdminOnly
 from news_monitor.telegram.moderation import ActionOutcome, ModerationService
+from news_monitor.telegram.settings_admin import SettingsAdminService, build_settings_router
+from news_monitor.telegram.sources_admin import SourceAdminService, build_sources_router
 
 logger = logging.getLogger(__name__)
 
-
-class AdminOnly(BaseFilter):
-    """Passes only for numeric ids listed in the administrator settings."""
-
-    def __init__(self, settings: Settings) -> None:
-        self.settings = settings
-
-    async def __call__(self, event: CallbackQuery) -> bool:
-        user = getattr(event, "from_user", None)
-        return self.settings.is_admin(getattr(user, "id", None))
+__all__ = [
+    "AdminOnly",
+    "build_router",
+    "create_bot",
+    "create_dispatcher",
+    "handle_moderation_callback",
+]
 
 
 async def handle_moderation_callback(
@@ -100,8 +99,35 @@ def create_bot(settings: Settings) -> Bot:
     )
 
 
-def create_dispatcher(service: ModerationService, settings: Settings) -> Dispatcher:
-    """Create a dispatcher with the moderation router registered."""
+async def register_admin_commands(bot: Bot, settings: Settings) -> None:
+    """Expose the source panel commands only in configured admin chats."""
+    commands = [
+        BotCommand(command="sources", description="Источники"),
+        BotCommand(command="settings", description="Настройки"),
+    ]
+    for admin_id in settings.admin_ids:
+        try:
+            await bot.set_my_commands(commands, scope=BotCommandScopeChat(chat_id=admin_id))
+        except Exception as exc:  # noqa: BLE001 - command menu must not stop polling
+            logger.warning("cannot register admin commands: %s", type(exc).__name__)
+
+
+def create_dispatcher(
+    service: ModerationService,
+    settings: Settings,
+    source_admin: SourceAdminService | None = None,
+    settings_admin: SettingsAdminService | None = None,
+) -> Dispatcher:
+    """Create a dispatcher with the admin and moderation routers registered.
+
+    The administration routers are included first: each one reacts only to its
+    own callback prefix and commands, so every other update still reaches the
+    moderation router below them.
+    """
     dispatcher = Dispatcher()
+    if source_admin is not None:
+        dispatcher.include_router(build_sources_router(source_admin, settings))
+    if settings_admin is not None:
+        dispatcher.include_router(build_settings_router(settings_admin, settings))
     dispatcher.include_router(build_router(service, settings))
     return dispatcher

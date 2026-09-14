@@ -6,6 +6,7 @@ import pytest
 
 from news_monitor.app import Application, _validate_settings, build_application
 from news_monitor.config.settings import Settings
+from news_monitor.config.sources import load_enabled_sources
 from news_monitor.telegram.moderation import ModerationService
 from tests.conftest import ADMIN_ID, STRANGER_ID
 
@@ -60,14 +61,16 @@ def test_error_message_never_contains_a_secret_value(tmp_path) -> None:
 
 async def test_application_wires_the_enabled_source(tmp_path) -> None:
     settings = _settings(tmp_path)
+    expected = [source.id for source in load_enabled_sources(settings.sources_file)]
     application = await build_application(settings)
 
     try:
         assert isinstance(application, Application)
-        assert list(application.pipelines) == ["flagman"]
+        assert "flagman" in expected
+        assert sorted(application.pipelines) == sorted(expected)
         assert application.pipelines["flagman"].source.adapter_type == "flagman_homepage"
-        assert [job.id for job in application.scheduler.scheduler.get_jobs()] == [
-            "pipeline:flagman"
+        assert sorted(job.id for job in application.scheduler.scheduler.get_jobs()) == [
+            f"pipeline:{source_id}" for source_id in sorted(expected)
         ]
 
         moderation = application.moderation

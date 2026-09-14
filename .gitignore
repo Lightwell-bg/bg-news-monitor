@@ -62,7 +62,19 @@ logs/
 docs/runs/*.txt
 !docs/runs/.gitkeep
 
+# Runtime settings changed by the administrator from Telegram
+config/runtime.yaml
+
+# Local AI development control plane; it is not part of the deployed service.
+.claude/
+.codex/
+AGENTS.md
+CLAUDE.md
+AI_DEV_TEAM_GUIDE.md
+
 # Local MVP database
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/sources.yaml
+data/runtime.yaml

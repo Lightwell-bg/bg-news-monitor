@@ -1,4 +1,8 @@
-"""Adapter for the Flagman homepage and its article pages."""
+"""Adapter for the BG24 homepage and its article pages.
+
+The adapter never performs a network call: the pipeline supplies the HTML, so
+every test runs on local fixtures.
+"""
 
 from __future__ import annotations
 
@@ -15,59 +19,73 @@ from news_monitor.sources.html_utils import (
     parse_datetime,
     parse_html,
 )
-from news_monitor.sources.links import looks_like_article_path
+from news_monitor.sources.links import (
+    is_listing_path,
+    is_skipped_link,
+    looks_like_article_path,
+)
 
 MIN_BODY_CHARS_FOR_SELECTOR = 200
+#: Below this length the extracted text is treated as boilerplate, not an article.
+MIN_USABLE_BODY_CHARS = 40
 
 LISTING_CONTAINER_SELECTORS: tuple[str, ...] = (
     "main",
     "#content",
-    ".content",
+    "#main",
+    ".site-main",
+    ".posts",
+    ".post-list",
     ".news-list",
-    ".articles",
-    "article",
+    ".content",
     "body",
 )
 
 ARTICLE_BODY_SELECTORS: tuple[str, ...] = (
     '[itemprop="articleBody"]',
-    "article .article-content",
-    "article .article-text",
-    ".article-content",
-    ".article-text",
-    ".news-content",
+    "article .entry-content",
+    "article .post-content",
     ".entry-content",
     ".post-content",
     ".single-content",
+    ".article-content",
+    ".news-content",
     "article",
 )
 
 TITLE_SELECTORS: tuple[str, ...] = (
-    "h1.article-title",
+    "h1.entry-title",
+    "h1.post-title",
     "article h1",
     "h1",
 )
 
 DATE_SELECTORS: tuple[str, ...] = (
     "time[datetime]",
-    ".article-date",
-    ".news-date",
+    ".entry-date",
+    ".post-date",
+    ".published",
     ".date",
 )
 
 
-class FlagmanHomepageAdapter:
-    """Parses the Flagman homepage listing and Flagman article pages."""
+class Bg24HomepageAdapter:
+    """Parses the BG24 homepage listing and BG24 article pages."""
 
-    adapter_type = "flagman_homepage"
+    adapter_type = "bg24_homepage"
 
-    def __init__(self, base_url: str = "https://www.flagman.bg/") -> None:
+    def __init__(self, base_url: str = "https://bg-24.com/") -> None:
         self.base_url = str(base_url)
 
     def parse_listing(self, html: str, section_url: str) -> list[ListingItem]:
-        """Return unique article links in document order."""
+        """Return unique article links of this host in document order.
+
+        Category, tag, author and pagination links are dropped even when their
+        slug looks like an article, so a listing page never becomes a candidate.
+        """
         tree = parse_html(html)
         base = section_url or self.base_url
+
         for selector in LISTING_CONTAINER_SELECTORS:
             container = tree.css_first(selector)
             if container is None:
@@ -77,7 +95,7 @@ class FlagmanHomepageAdapter:
             items: list[ListingItem] = []
             for anchor in container.css("a[href]"):
                 href = (anchor.attributes.get("href") or "").strip()
-                if not href or href.startswith(("#", "mailto:", "tel:", "javascript:")):
+                if is_skipped_link(href):
                     continue
                 try:
                     absolute = normalize_url(href, base_url=base)
@@ -85,26 +103,32 @@ class FlagmanHomepageAdapter:
                     continue
                 if not same_host(absolute, self.base_url):
                     continue
-                if not looks_like_article_path(urlsplit(absolute).path):
+                path = urlsplit(absolute).path
+                if is_listing_path(path) or not looks_like_article_path(path):
                     continue
                 if absolute in seen:
                     continue
                 seen.add(absolute)
-                items.append(ListingItem(url=absolute, title=normalize_text(anchor.text())))
+                items.append(
+                    ListingItem(url=absolute, title=normalize_text(anchor.text()))
+                )
             if items:
                 return items
         return []
 
     def parse_article(self, html: str, article_url: str) -> ArticleContent | None:
-        """Extract title, publication time and body text from an article page."""
+        """Extract title, publication time and body text from an article page.
+
+        Returns ``None`` when the page carries no title or no usable body, so an
+        incomplete page is skipped instead of reaching the AI as a stub.
+        """
         tree = parse_html(html)
 
-        title = (
-            json_ld_value(tree, "headline", "name")
-            or meta_content(tree, 'meta[property="og:title"]', 'meta[name="title"]')
+        title = normalize_text(
+            meta_content(tree, 'meta[property="og:title"]', 'meta[name="title"]')
+            or json_ld_value(tree, "headline")
             or first_text(tree, *TITLE_SELECTORS)
         )
-        title = normalize_text(title)
         if not title:
             return None
 
@@ -114,12 +138,14 @@ class FlagmanHomepageAdapter:
             'meta[name="description"]',
         )
 
-        raw_date = json_ld_value(tree, "datePublished", "dateCreated") or meta_content(
-            tree,
-            'meta[property="article:published_time"]',
-            'meta[itemprop="datePublished"]',
+        published_at = parse_datetime(
+            json_ld_value(tree, "datePublished", "dateCreated")
+            or meta_content(
+                tree,
+                'meta[property="article:published_time"]',
+                'meta[itemprop="datePublished"]',
+            )
         )
-        published_at = parse_datetime(raw_date)
         if published_at is None:
             for selector in DATE_SELECTORS:
                 node = tree.css_first(selector)
@@ -138,13 +164,16 @@ class FlagmanHomepageAdapter:
                 body = candidate
             if len(body) >= MIN_BODY_CHARS_FOR_SELECTOR:
                 break
-        if not body:
-            body = summary
+        if len(body) < MIN_USABLE_BODY_CHARS:
+            body = summary if len(summary) > len(body) else body
+        body = normalize_text(body)
+        if len(body) < MIN_USABLE_BODY_CHARS:
+            return None
 
         return ArticleContent(
             url=article_url,
             title=title,
-            body=normalize_text(body),
+            body=body,
             published_at=published_at,
             summary=summary,
             section=meta_content(tree, 'meta[property="article:section"]'),
