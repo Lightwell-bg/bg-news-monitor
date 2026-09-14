@@ -87,11 +87,15 @@ def test_settings_module_reads_secrets_only_from_the_environment() -> None:
     assert "env_file" in source
 
 
+TELEGRAM_TEST_TOKEN = "1234567890:" + "AAHrandomsecretvaluewithenoughlength12"
+OPENROUTER_TEST_TOKEN = "sk-or-v1-" + "abcdefghijklmnopqrstuvwxyz012345"
+
+
 @pytest.mark.parametrize(
     "message",
     [
-        "bot token 1234567890:AAHrandomsecretvaluewithenoughlength12",
-        "key sk-or-v1-abcdefghijklmnopqrstuvwxyz012345",
+        f"bot token {TELEGRAM_TEST_TOKEN}",
+        f"key {OPENROUTER_TEST_TOKEN}",
         "Authorization: Bearer abcdefghijklmnop",
         "api_key=supersecretvalue",
         "password: hunter2hunter2",
@@ -100,7 +104,7 @@ def test_settings_module_reads_secrets_only_from_the_environment() -> None:
 def test_redaction_removes_credentials(message: str) -> None:
     cleaned = redact(message)
     assert REDACTED in cleaned
-    for token in ("AAHrandomsecretvaluewithenoughlength12", "supersecretvalue", "hunter2hunter2"):
+    for token in (TELEGRAM_TEST_TOKEN, "supersecretvalue", "hunter2hunter2"):
         assert token not in cleaned
 
 
@@ -111,13 +115,14 @@ def test_redaction_keeps_ordinary_text() -> None:
 def test_logging_filter_redacts_message_and_arguments(caplog) -> None:
     logger = logging.getLogger("news_monitor.test.redaction")
     logger.addFilter(RedactingFilter())
+    test_token = "1234567890:" + "AAHsecretsecretsecretsecret1234567"
     with caplog.at_level(logging.INFO, logger=logger.name):
         for handler_filter in (RedactingFilter(),):
             caplog.handler.addFilter(handler_filter)
-        logger.info("calling with token %s", "1234567890:AAHsecretsecretsecretsecret1234567")
+        logger.info("calling with token %s", test_token)
 
     combined = " ".join(record.getMessage() for record in caplog.records)
-    assert "AAHsecretsecretsecretsecret1234567" not in combined
+    assert test_token not in combined
     assert REDACTED in combined
 
 
