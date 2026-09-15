@@ -165,6 +165,26 @@ class SourcesStore:
                 return source
         raise SourcesStoreError(f"Источник не найден: {wanted or '-'}")
 
+    def add_if_missing(self, source: SourceConfig) -> bool:
+        """Add a complete source once, without changing existing sources.
+
+        This is used by a narrowly scoped image-upgrade migration: a persistent
+        runtime ``sources.yaml`` otherwise never receives a newly bundled
+        source.  Existing administrator choices always win.
+        """
+        header, document = self._read_document()
+        entries = document.get("sources")
+        if not isinstance(entries, list):
+            raise SourcesStoreError("Файл источников имеет неожиданную структуру.")
+        if any(
+            isinstance(entry, dict) and str(entry.get("id", "")).strip() == source.id
+            for entry in entries
+        ):
+            return False
+        entries.append(source.model_dump(mode="json"))
+        self._write(header, document)
+        return True
+
     # ----------------------------------------------------------------- edits
 
     def set_enabled(self, source_id: str, enabled: bool) -> EditResult:
