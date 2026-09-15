@@ -81,7 +81,7 @@ def test_importance_threshold_range_is_enforced() -> None:
 
 def test_project_sources_file_is_valid() -> None:
     sources = load_sources(SOURCES_FILE)
-    assert {source.id for source in sources} == {"flagman", "bg24"}
+    assert {source.id for source in sources} == {"flagman", "bg24", "burgas24"}
 
 
 def test_flagman_is_enabled_with_a_registered_adapter() -> None:

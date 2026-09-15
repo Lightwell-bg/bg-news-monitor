@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from news_monitor.sources.base import SourceAdapter
 from news_monitor.sources.bg24 import Bg24HomepageAdapter
+from news_monitor.sources.burgas24 import Burgas24HomepageAdapter
 from news_monitor.sources.flagman import FlagmanHomepageAdapter
 
 _ADAPTERS: dict[str, type] = {
     Bg24HomepageAdapter.adapter_type: Bg24HomepageAdapter,
+    Burgas24HomepageAdapter.adapter_type: Burgas24HomepageAdapter,
     FlagmanHomepageAdapter.adapter_type: FlagmanHomepageAdapter,
 }
 

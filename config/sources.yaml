@@ -55,3 +55,30 @@ sources:
         - advertising
         - clickbait
         - duplicate coverage without new facts
+  - id: burgas24
+    name: Burgas24
+    base_url: https://www.burgas24.bg/
+    sections:
+      - name: Главная страница
+        url: https://www.burgas24.bg/
+    adapter_type: burgas24_homepage
+    language: bg
+    enabled: true
+    min_interval_minutes: 30
+    inclusion_rules:
+      topics:
+        - Bulgaria and EU
+        - migration and residency
+        - legislation and administration
+        - taxes business and real estate
+        - Burgas region
+        - prices healthcare and education
+        - events affecting foreigners
+    exclusion_rules:
+      topics:
+        - crime without public significance
+        - celebrities and gossip
+        - sport
+        - advertising
+        - clickbait
+        - duplicate coverage without new facts
