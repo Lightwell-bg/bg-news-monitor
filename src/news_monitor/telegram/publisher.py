@@ -6,6 +6,8 @@ import logging
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from aiogram.types import LinkPreviewOptions
+
 from news_monitor.filters.guards import check_source_link
 from news_monitor.storage.models import NewsItem
 from news_monitor.telegram.card import render_channel_post
@@ -76,7 +78,11 @@ class ChannelPublisher:
                 self._channel_id,
                 text,
                 parse_mode="HTML",
-                disable_web_page_preview=False,
+                # Pin the preview to the article: Telegram would otherwise
+                # pick any link, including a project link from the footer.
+                link_preview_options=LinkPreviewOptions(
+                    url=item.url, prefer_large_media=True
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - re-raised as a domain error
             raise PublicationError(f"telegram send failed: {type(exc).__name__}") from exc

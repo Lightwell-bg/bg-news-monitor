@@ -18,6 +18,16 @@ BUTTON_REJECT = "\u274c \u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c"
 BUTTON_REGENERATE = "\U0001f504 \u041f\u0435\u0440\u0435\u0433\u0435\u043d\u0435\u0440\u0438\u0440\u043e\u0432\u0430\u0442\u044c"
 BUTTON_OPEN_SOURCE = "\U0001f517 \u041e\u0442\u043a\u0440\u044b\u0442\u044c \u0438\u0441\u0442\u043e\u0447\u043d\u0438\u043a"
 
+#: Project links appended under every channel post as (emoji, label, url).
+CHANNEL_FOOTER_LINKS: tuple[tuple[str, str, str], ...] = (
+    ("\U0001f4f0", "\u0412\u0430\u0436\u043d\u044b\u0435 \u043d\u043e\u0432\u043e\u0441\u0442\u0438 \u043e \u0436\u0438\u0437\u043d\u0438 \u0432 \u0411\u043e\u043b\u0433\u0430\u0440\u0438\u0438", "https://t.me/bginfosu"),
+    ("\U0001f9ed", "\u0412\u044b\u0431\u043e\u0440 \u043e\u0441\u043d\u043e\u0432\u0430\u043d\u0438\u044f \u0434\u043b\u044f \u0436\u0438\u0437\u043d\u0438 \u0432 \u0411\u043e\u043b\u0433\u0430\u0440\u0438\u0438", "https://t.me/bginfosu_bot"),
+    ("\U0001f4ac", "\u0417\u0430\u0434\u0430\u0442\u044c \u0432\u043e\u043f\u0440\u043e\u0441", "https://t.me/bginfosuai_bot"),
+    ("\U0001f3e0", "\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430 \u0436\u0438\u043b\u044c\u044f", "https://t.me/RentalReviewsBG"),
+    ("\U0001f6d2", "\u0421\u043e\u0432\u043c\u0435\u0441\u0442\u043d\u044b\u0435 \u043f\u043e\u043a\u0443\u043f\u043a\u0438", "https://t.me/soobschaeu"),
+    ("\U0001f1e7\U0001f1ec", "\u0411\u043e\u043b\u0433\u0430\u0440\u0441\u043a\u0438\u0439 \u044f\u0437\u044b\u043a \u0434\u043b\u044f \u0436\u0438\u0437\u043d\u0438", "https://t.me/vira_bulgarianbot"),
+)
+
 
 def build_callback_data(action: str, item_id: int) -> str:
     """Build the callback payload for a moderation button."""
@@ -117,4 +127,19 @@ def render_channel_post(item: NewsItem) -> str:
     lines.append(f'Источник: <a href="{safe_url}">{source_name}</a>')
     # Escaped as well: a raw ampersand breaks Telegram HTML parsing.
     lines.append(safe_url)
+    lines.append("")
+    lines.append(_render_footer())
     return "\n".join(lines)
+
+
+def _render_footer() -> str:
+    """Render the project links as one compact quote under the post.
+
+    The links come after the source link, so Telegram still builds the link
+    preview from the article and not from a project channel.
+    """
+    rows = [
+        f'{emoji} <a href="{escape(url, quote=True)}">{escape(label)}</a>'
+        for emoji, label, url in CHANNEL_FOOTER_LINKS
+    ]
+    return "<blockquote>" + "\n".join(rows) + "</blockquote>"

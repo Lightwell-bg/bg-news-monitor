@@ -18,6 +18,7 @@ from news_monitor.telegram.card import (
     render_admin_card,
     render_channel_post,
 )
+from news_monitor.telegram.card import CHANNEL_FOOTER_LINKS
 from news_monitor.telegram.moderation import ActionOutcome, ModerationService
 from news_monitor.telegram.publisher import ChannelPublisher
 from news_monitor.telegram.sender import AdminCardSender
@@ -70,6 +71,10 @@ async def test_admin_can_publish(repository, fake_bot, settings) -> None:
 
     assert result.outcome is ActionOutcome.PUBLISHED
     assert len(fake_bot.messages_to(CHANNEL_ID)) == 1
+    # The preview (article image) is pinned to the source, not a footer link.
+    preview = fake_bot.messages_to(CHANNEL_ID)[0].kwargs["link_preview_options"]
+    assert preview.url == ARTICLE_URL
+    assert preview.prefer_large_media is True
 
     stored = await repository.get(item.id)
     assert stored.status_enum is NewsStatus.PUBLISHED
@@ -286,6 +291,17 @@ async def test_publication_always_contains_the_source_link(repository) -> None:
     item = await _awaiting_item(repository)
     post = render_channel_post(item)
     assert ARTICLE_URL in post
+
+
+async def test_publication_ends_with_project_links_after_the_source(repository) -> None:
+    item = await _awaiting_item(repository)
+    post = render_channel_post(item)
+
+    for _emoji, label, url in CHANNEL_FOOTER_LINKS:
+        assert f'<a href="{url}">{label}</a>' in post
+    # The source link stays first, so the link preview is built from the article.
+    assert post.index(ARTICLE_URL) < post.index("https://t.me/")
+    assert post.rstrip().endswith("</blockquote>")
 
 
 async def test_publication_without_a_url_is_impossible(repository) -> None:
