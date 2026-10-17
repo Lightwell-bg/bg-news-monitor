@@ -8,7 +8,8 @@ WORKDIR /app
 
 COPY pyproject.toml README.md ./
 COPY src ./src
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && python -c "import news_monitor.app"
 
 # A fresh installation gets the tracked source list once. Runtime edits made
 # through Telegram are stored in /app/data and survive image upgrades.
