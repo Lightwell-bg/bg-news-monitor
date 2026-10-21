@@ -69,6 +69,7 @@ class Settings(BaseSettings):
 
     check_interval_minutes: int = Field(default=20, ge=1)
     importance_threshold: int = Field(default=70, ge=0, le=100)
+    publish_delay_max_minutes: int = Field(default=60, ge=5, le=1440)
     database_url: str = Field(default="sqlite+aiosqlite:///./data/news.db")
     dry_run: bool = Field(default=True)
 

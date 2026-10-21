@@ -30,6 +30,33 @@ def _settings(tmp_path, **overrides) -> Settings:
     return Settings(**data)
 
 
+async def test_stuck_approved_items_are_reported_not_resent(
+    repository, caplog
+) -> None:
+    from news_monitor.app import warn_about_stuck_approved
+
+    item, _ = await repository.register_discovered(
+        source_id="flagman",
+        source_name="Flagman",
+        url="https://flagman.bg/statia/9-novina",
+        title="Заглавие",
+    )
+    await repository.mark_fetched(item.id, title="Заглавие", body_hash="9" * 64)
+    await repository.mark_candidate(
+        item.id, importance=85, ai_reason="Важно", title_ru="З", draft_ru="Д"
+    )
+    await repository.mark_awaiting_approval(item.id, chat_id=ADMIN_ID, message_id=1)
+    assert await warn_about_stuck_approved(repository) == []
+    await repository.approve_now(item.id, admin_id=ADMIN_ID)
+
+    with caplog.at_level("WARNING"):
+        stuck = await warn_about_stuck_approved(repository)
+
+    assert stuck == [item.id]
+    assert str(item.id) in caplog.text
+    assert (await repository.get(item.id)).status == "APPROVED"
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [

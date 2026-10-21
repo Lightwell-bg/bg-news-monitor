@@ -1,0 +1,219 @@
+{
+  "run_id": "93b48984-9574-48e5-9908-942bb4b48d06",
+  "session_id": "a36ced5f-cfb1-4923-ab06-9fe30adf7e64",
+  "started_at": 1792232780882,
+  "prompt_id": "94256df181e845f11e2a3fdb",
+  "transcript_path": "C:\\Users\\Vlad\\.claude\\projects\\d--1PythonProjects-20260910news-post-bg-news-monitor\\a36ced5f-cfb1-4923-ab06-9fe30adf7e64.jsonl",
+  "baseline": {
+    "messages": {
+      "9ac7f855d9656cab10188613": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 181,
+          "cache_read_input_tokens": 26875,
+          "cache_creation_input_tokens": 41219
+        }
+      },
+      "30ea8b15622f5bab717693d1": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 177,
+          "cache_read_input_tokens": 68094,
+          "cache_creation_input_tokens": 517
+        }
+      },
+      "b7bc405039a871ac4b12c5b3": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 374,
+          "cache_read_input_tokens": 68611,
+          "cache_creation_input_tokens": 3511
+        }
+      },
+      "7b54af652c894bbbc7e7373c": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 727,
+          "cache_read_input_tokens": 72122,
+          "cache_creation_input_tokens": 2410
+        }
+      },
+      "a4890d8ae2befb567be45ae9": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 1133,
+          "cache_read_input_tokens": 74532,
+          "cache_creation_input_tokens": 2338
+        }
+      },
+      "85fae52149b5ebbf8ddf1660": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 144,
+          "cache_read_input_tokens": 76870,
+          "cache_creation_input_tokens": 1317
+        }
+      },
+      "bb13700a5c4bcfe180284f54": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 686,
+          "cache_read_input_tokens": 78187,
+          "cache_creation_input_tokens": 336
+        }
+      },
+      "2011e342ceb7f461f53b01a5": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 272,
+          "cache_read_input_tokens": 78523,
+          "cache_creation_input_tokens": 1068
+        }
+      },
+      "71c621cfe5c96ef94c12c38e": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 295,
+          "cache_read_input_tokens": 79591,
+          "cache_creation_input_tokens": 739
+        }
+      },
+      "845e176b70f18cf59695467d": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 267,
+          "cache_read_input_tokens": 80330,
+          "cache_creation_input_tokens": 956
+        }
+      },
+      "17e9f599eddd29192ea4197d": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 933,
+          "cache_read_input_tokens": 81286,
+          "cache_creation_input_tokens": 336
+        }
+      },
+      "d6f5e61cf60b7f6c0ee02b42": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 588,
+          "cache_read_input_tokens": 81622,
+          "cache_creation_input_tokens": 1306
+        }
+      },
+      "01de5ea00bf3ed00cee78187": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 352,
+          "cache_read_input_tokens": 82928,
+          "cache_creation_input_tokens": 1247
+        }
+      },
+      "1b290fd81da036d3d21b8550": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 363,
+          "cache_read_input_tokens": 84175,
+          "cache_creation_input_tokens": 453
+        }
+      },
+      "bddbcf93394679b34212d3e2": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 266,
+          "cache_read_input_tokens": 84628,
+          "cache_creation_input_tokens": 518
+        }
+      },
+      "6c1487e2eb4394223ea2ab28": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 416,
+          "cache_read_input_tokens": 85922,
+          "cache_creation_input_tokens": 0
+        }
+      },
+      "eaa416b1113d92682a652382": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 590,
+          "cache_read_input_tokens": 85146,
+          "cache_creation_input_tokens": 1231
+        }
+      },
+      "428880cb68ef29afdd5bad6f": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 199,
+          "cache_read_input_tokens": 86377,
+          "cache_creation_input_tokens": 903
+        }
+      },
+      "4fbc5f5a891d41d216a7e58d": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 623,
+          "cache_read_input_tokens": 87280,
+          "cache_creation_input_tokens": 671
+        }
+      },
+      "a2dffcb43f4bfc79801ec9a3": {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "usage": {
+          "input_tokens": 2,
+          "output_tokens": 928,
+          "cache_read_input_tokens": 87951,
+          "cache_creation_input_tokens": 969
+        }
+      }
+    },
+    "warnings": [],
+    "readable": 1,
+    "files": 1,
+    "assistants_without_usage": 0
+  },
+  "before": null,
+  "ended_at": 1792232878411,
+  "after": null,
+  "status": "observed_at_stop"
+}

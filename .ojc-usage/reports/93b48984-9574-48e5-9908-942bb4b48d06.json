@@ -1,0 +1,73 @@
+{
+  "schema_version": 2,
+  "run_id": "93b48984-9574-48e5-9908-942bb4b48d06",
+  "session_id": "a36ced5f-cfb1-4923-ab06-9fe30adf7e64",
+  "started_at": 1792232780882,
+  "ended_at": 1792232878411,
+  "duration_seconds": 97.529,
+  "status": "observed_at_stop",
+  "tokens": {
+    "requests": 5,
+    "by_model": [
+      {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "requests": 5,
+        "input_tokens": 10,
+        "output_tokens": 2455,
+        "cache_read_input_tokens": 402923,
+        "cache_creation_input_tokens": 69130
+      }
+    ],
+    "input_tokens": 10,
+    "output_tokens": 2455,
+    "cache_read_input_tokens": 402923,
+    "cache_creation_input_tokens": 69130,
+    "total_tokens": 474518
+  },
+  "limits": {
+    "five_hour": {
+      "before": null,
+      "after": null,
+      "delta_percentage_points": null,
+      "reason": "statusline callback not observed",
+      "before_observed_at": null,
+      "after_observed_at": null
+    },
+    "seven_day": {
+      "before": null,
+      "after": null,
+      "delta_percentage_points": null,
+      "reason": "statusline callback not observed",
+      "before_observed_at": null,
+      "after_observed_at": null
+    }
+  },
+  "limit_sample_delay_seconds": 0,
+  "session_tokens": {
+    "requests": 25,
+    "by_model": [
+      {
+        "model": "claude-opus-5-5",
+        "origin": "main",
+        "requests": 25,
+        "input_tokens": 50,
+        "output_tokens": 11969,
+        "cache_read_input_tokens": 1953973,
+        "cache_creation_input_tokens": 131175
+      }
+    ],
+    "input_tokens": 50,
+    "output_tokens": 11969,
+    "cache_read_input_tokens": 1953973,
+    "cache_creation_input_tokens": 131175,
+    "total_tokens": 2097167
+  },
+  "session_observed_through": 1792232878411,
+  "notes": [
+    "Observed transcript usage, not an authoritative bill. Missing/late records and unsupported subagent layouts may undercount.",
+    "Limit changes cover the entire account interval, may be cached/rounded, and cannot isolate concurrent sessions.",
+    "No statusline samples for this session. In VS Code/desktop/SDK mode use /usage; automatic limit snapshots need an interactive terminal statusline."
+  ],
+  "transcript_files_observed": 1
+}

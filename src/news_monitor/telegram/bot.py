@@ -10,9 +10,14 @@ from aiogram.enums import ParseMode
 from aiogram.types import BotCommand, BotCommandScopeChat, CallbackQuery
 
 from news_monitor.config.settings import Settings
-from news_monitor.telegram.card import build_keyboard, parse_callback_data, render_admin_card
+from news_monitor.telegram.card import (
+    build_keyboard,
+    build_scheduled_keyboard,
+    parse_callback_data,
+    render_admin_card,
+)
 from news_monitor.telegram.filters import AdminOnly
-from news_monitor.telegram.moderation import ActionOutcome, ModerationService
+from news_monitor.telegram.moderation import ActionOutcome, ActionResult, ModerationService
 from news_monitor.telegram.settings_admin import SettingsAdminService, build_settings_router
 from news_monitor.telegram.sources_admin import SourceAdminService, build_sources_router
 
@@ -24,6 +29,7 @@ __all__ = [
     "create_bot",
     "create_dispatcher",
     "handle_moderation_callback",
+    "refresh_cards_after_publication",
 ]
 
 
@@ -53,12 +59,20 @@ async def handle_moderation_callback(
     if message is None:
         return
 
-    if result.outcome is ActionOutcome.REGENERATED and result.item is not None:
+    keyboard = None
+    if result.item is not None:
+        if result.outcome is ActionOutcome.SCHEDULED:
+            keyboard = build_scheduled_keyboard(result.item)
+        elif result.outcome in {ActionOutcome.UNSCHEDULED, ActionOutcome.REGENERATED}:
+            keyboard = build_keyboard(
+                result.item, delay_max_minutes=service.publish_delay_max_minutes
+            )
+    if keyboard is not None and result.item is not None:
         try:
             await message.edit_text(
                 render_admin_card(result.item),
                 parse_mode="HTML",
-                reply_markup=build_keyboard(result.item),
+                reply_markup=keyboard,
                 disable_web_page_preview=True,
             )
         except Exception as exc:  # noqa: BLE001 - a failed edit must not crash the bot
@@ -70,6 +84,39 @@ async def handle_moderation_callback(
             await message.edit_reply_markup(reply_markup=None)
         except Exception as exc:  # noqa: BLE001 - a failed edit must not crash the bot
             logger.debug("cannot clear buttons for %s: %s", item_id, type(exc).__name__)
+
+
+_PUBLICATION_STATUS_LINES: dict[ActionOutcome, str] = {
+    ActionOutcome.PUBLISHED: "✅ Опубликовано по расписанию",
+    ActionOutcome.PUBLISHED_DRY_RUN: "Черновой режим: не отправлено",
+    ActionOutcome.PUBLICATION_FAILED: "⚠️ Публикация не удалась",
+}
+
+
+async def refresh_cards_after_publication(bot: Bot, results: list[ActionResult]) -> None:
+    """Update the admin card of every item the scheduler has just processed.
+
+    Buttons are removed and a status line is appended. A failed edit is logged
+    and never raised: the publication itself is already done.
+    """
+    for result in results:
+        item = result.item
+        status_line = _PUBLICATION_STATUS_LINES.get(result.outcome)
+        if item is None or status_line is None:
+            continue
+        if item.admin_chat_id is None or item.admin_message_id is None:
+            continue
+        try:
+            await bot.edit_message_text(
+                text=f"{render_admin_card(item)}\n\n{status_line}",
+                chat_id=item.admin_chat_id,
+                message_id=item.admin_message_id,
+                parse_mode="HTML",
+                reply_markup=None,
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - a failed edit must not stop the job
+            logger.warning("cannot refresh card %s: %s", item.id, type(exc).__name__)
 
 
 def build_router(service: ModerationService, settings: Settings) -> Router:

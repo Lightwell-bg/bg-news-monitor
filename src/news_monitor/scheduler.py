@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 
 from apscheduler.jobstores.base import JobLookupError
@@ -13,6 +14,9 @@ from news_monitor.config.settings import Settings
 from news_monitor.pipeline import NewsPipeline
 
 logger = logging.getLogger(__name__)
+
+#: The single job that publishes due scheduled items.
+PUBLICATION_JOB_ID = "publisher:due"
 
 
 def effective_interval_minutes(pipeline: NewsPipeline, settings: Settings) -> int:
@@ -81,6 +85,29 @@ class PipelineScheduler:
             "source %s scheduled every %s minutes", pipeline.source.id, minutes
         )
         return minutes
+
+    def add_publication_job(
+        self, job: Callable[[], Awaitable[None]], *, seconds: int = 30
+    ) -> None:
+        """Register the job that publishes scheduled items whose time has come."""
+        self._remove_existing(PUBLICATION_JOB_ID)
+
+        async def _job() -> None:
+            try:
+                await job()
+            except Exception:  # noqa: BLE001 - one failure must not stop the loop
+                logger.exception("scheduled publication run failed")
+
+        self._scheduler.add_job(
+            _job,
+            trigger=IntervalTrigger(seconds=seconds),
+            id=PUBLICATION_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            next_run_time=datetime.now(UTC),
+        )
+        logger.info("scheduled publication check every %s seconds", seconds)
 
     def start(self) -> None:
         """Start the scheduler."""

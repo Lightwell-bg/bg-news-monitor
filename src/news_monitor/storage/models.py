@@ -22,6 +22,15 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def as_utc(value: datetime | None) -> datetime | None:
+    """Return an aware UTC datetime; SQLite hands back naive values, read as UTC."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class NewsStatus(str, enum.Enum):
     """Lifecycle of a discovered news item."""
 
@@ -31,6 +40,7 @@ class NewsStatus(str, enum.Enum):
     REJECTED_BY_FILTER = "REJECTED_BY_FILTER"
     CANDIDATE = "CANDIDATE"
     AWAITING_APPROVAL = "AWAITING_APPROVAL"
+    SCHEDULED = "SCHEDULED"
     REJECTED_BY_ADMIN = "REJECTED_BY_ADMIN"
     APPROVED = "APPROVED"
     PUBLISHED = "PUBLISHED"
@@ -66,6 +76,13 @@ ALLOWED_TRANSITIONS: dict[NewsStatus, frozenset[NewsStatus]] = {
         {
             NewsStatus.REJECTED_BY_ADMIN,
             NewsStatus.APPROVED,
+            NewsStatus.SCHEDULED,
+        }
+    ),
+    NewsStatus.SCHEDULED: frozenset(
+        {
+            NewsStatus.APPROVED,
+            NewsStatus.AWAITING_APPROVAL,
         }
     ),
     NewsStatus.APPROVED: frozenset(
@@ -146,6 +163,9 @@ class NewsItem(Base):
     admin_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     channel_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     decided_by: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scheduled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

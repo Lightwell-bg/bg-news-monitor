@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Protocol, runtime_checkable
 
+from news_monitor.config.settings import Settings
 from news_monitor.storage.models import NewsItem
 from news_monitor.storage.repository import NewsRepository
 from news_monitor.telegram.card import build_keyboard, render_admin_card
@@ -28,7 +29,9 @@ class AdminCardSender:
         sender: MessageSender,
         repository: NewsRepository,
         admin_ids: tuple[int, ...],
+        settings: Settings | None = None,
     ) -> None:
+        self._settings = settings
         self._sender = sender
         self._repository = repository
         self._admin_ids = tuple(admin_ids)
@@ -44,7 +47,12 @@ class AdminCardSender:
             return None
 
         text = render_admin_card(item)
-        keyboard = build_keyboard(item)
+        delay_max = (
+            int(self._settings.publish_delay_max_minutes)
+            if self._settings is not None
+            else None
+        )
+        keyboard = build_keyboard(item, delay_max_minutes=delay_max)
 
         for admin_id in self._admin_ids:
             try:

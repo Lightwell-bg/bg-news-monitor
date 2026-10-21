@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import UTC, datetime
 
 import pytest
@@ -11,6 +12,8 @@ from news_monitor.storage.models import NewsStatus
 from news_monitor.storage.repository import NewsRepository
 from news_monitor.telegram.card import (
     ACTION_APPROVE,
+    ACTION_CANCEL_SCHEDULE,
+    ACTION_PUBLISH_NOW,
     ACTION_REGENERATE,
     ACTION_REJECT,
     build_callback_data,
@@ -18,7 +21,7 @@ from news_monitor.telegram.card import (
     render_admin_card,
     render_channel_post,
 )
-from news_monitor.telegram.card import CHANNEL_FOOTER_LINKS
+from news_monitor.telegram.card import CHANNEL_FOOTER_ROWS
 from news_monitor.telegram.moderation import ActionOutcome, ModerationService
 from news_monitor.telegram.publisher import ChannelPublisher
 from news_monitor.telegram.sender import AdminCardSender
@@ -66,7 +69,7 @@ async def test_admin_can_publish(repository, fake_bot, settings) -> None:
     service = _service(repository, fake_bot, settings)
 
     result = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
     )
 
     assert result.outcome is ActionOutcome.PUBLISHED
@@ -86,7 +89,7 @@ async def test_second_admin_from_the_list_is_allowed(repository, fake_bot, setti
     service = _service(repository, fake_bot, settings)
 
     result = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=SECOND_ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=SECOND_ADMIN_ID
     )
     assert result.outcome is ActionOutcome.PUBLISHED
 
@@ -129,10 +132,10 @@ async def test_second_press_does_not_create_a_second_post(
     service = _service(repository, fake_bot, settings)
 
     first = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
     )
     second = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
     )
 
     assert first.outcome is ActionOutcome.PUBLISHED
@@ -150,7 +153,7 @@ async def test_concurrent_presses_publish_once(repository, fake_bot, settings) -
     results = await asyncio.gather(
         *(
             service.handle_action(
-                action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+                action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
             )
             for _ in range(4)
         )
@@ -197,7 +200,7 @@ async def test_failed_publication_is_recorded(repository, fake_bot, settings) ->
     fake_bot.fail_next = True
 
     result = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
     )
 
     assert result.outcome is ActionOutcome.PUBLICATION_FAILED
@@ -212,7 +215,7 @@ async def test_dry_run_does_not_send_to_the_channel(repository, fake_bot, settin
     service = _service(repository, fake_bot, settings)
 
     result = await service.handle_action(
-        action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
     )
 
     assert result.outcome is ActionOutcome.PUBLISHED_DRY_RUN
@@ -258,7 +261,9 @@ async def test_regeneration_after_publication_is_refused(
         return valid_assessment
 
     service = _service(repository, fake_bot, settings, regenerator=regenerator)
-    await service.handle_action(action=ACTION_APPROVE, item_id=item.id, user_id=ADMIN_ID)
+    await service.handle_action(
+        action=ACTION_PUBLISH_NOW, item_id=item.id, user_id=ADMIN_ID
+    )
 
     result = await service.handle_action(
         action=ACTION_REGENERATE, item_id=item.id, user_id=ADMIN_ID
@@ -297,11 +302,20 @@ async def test_publication_ends_with_project_links_after_the_source(repository) 
     item = await _awaiting_item(repository)
     post = render_channel_post(item)
 
-    for _emoji, label, url in CHANNEL_FOOTER_LINKS:
+    links = [link for row in CHANNEL_FOOTER_ROWS for link in row]
+    assert len(links) == 9
+    for _emoji, label, url in links:
         assert f'<a href="{url}">{label}</a>' in post
+    # Every project URL appears only inside an href, never as visible text.
+    outside_hrefs = re.sub(r'href="[^"]*"', "", post)
+    assert "https://t.me" not in outside_hrefs
+    assert post.count("<blockquote>") == 1
+    assert post.count("</blockquote>") == 1
     # The source link stays first, so the link preview is built from the article.
     assert post.index(ARTICLE_URL) < post.index("https://t.me/")
     assert post.rstrip().endswith("</blockquote>")
+    assert len(CHANNEL_FOOTER_ROWS) == 4
+    assert item.url == ARTICLE_URL
 
 
 async def test_publication_without_a_url_is_impossible(repository) -> None:
@@ -378,6 +392,49 @@ async def test_post_with_query_parameters_is_valid_telegram_html(repository) -> 
     from news_monitor.filters.guards import check_source_link
 
     assert check_source_link(post, item.url).passed
+
+
+def _visible_units(post: str) -> int:
+    import html
+
+    plain = html.unescape(re.sub(r"<[^>]*>", "", post))
+    return len(plain.encode("utf-16-le")) // 2
+
+
+async def test_overlong_draft_is_shortened_to_the_telegram_limit(repository) -> None:
+    item, _ = await repository.register_discovered(
+        source_id="flagman",
+        source_name="Flagman",
+        url="https://flagman.bg/statia/3-novina?a=1&b=2",
+        title="Заглавие",
+    )
+    item.title_ru = "Русский заголовок"
+    item.draft_ru = "Слово & ещё \U0001f600 текст. " * 300
+    original = item.draft_ru
+    assert len(original) > 6000
+
+    post = render_channel_post(item)
+
+    assert _visible_units(post) <= 4096
+    # The result is tight, not needlessly short.
+    assert _visible_units(post) > 4096 - 200
+    assert item.draft_ru == original
+    assert "<b>Русский заголовок</b>" in post
+    assert "…\n" in post
+    assert post.rstrip().endswith("</blockquote>")
+    for row in CHANNEL_FOOTER_ROWS:
+        for _emoji, label, url in row:
+            assert f'<a href="{url}">{label}</a>' in post
+    from news_monitor.filters.guards import check_source_link
+
+    assert check_source_link(post, item.url).passed
+
+
+async def test_normal_draft_is_not_changed(repository) -> None:
+    item = await _awaiting_item(repository)
+    post = render_channel_post(item)
+    assert "…" not in post
+    assert item.draft_ru in post
 
 
 async def test_post_escapes_html_in_the_draft(repository) -> None:

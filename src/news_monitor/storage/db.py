@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from sqlalchemy import Connection, inspect, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -43,10 +44,32 @@ def create_session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSessi
     return async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
 
 
+#: Columns added after the first release: (table, column, DDL type).
+#: create_all never alters an existing table, so they are added here.
+_ADDITIVE_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("news_items", "scheduled_at", "DATETIME"),
+)
+
+
+def _add_missing_columns(connection: Connection) -> None:
+    """Add every column of _ADDITIVE_COLUMNS that an older database lacks."""
+    inspector = inspect(connection)
+    tables = set(inspector.get_table_names())
+    for table, column, ddl_type in _ADDITIVE_COLUMNS:
+        if table not in tables:
+            continue
+        existing = {col["name"] for col in inspector.get_columns(table)}
+        if column in existing:
+            continue
+        connection.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+        logger.info("added column %s.%s to the existing database", table, column)
+
+
 async def init_db(engine: AsyncEngine) -> None:
-    """Create every table that does not exist yet."""
+    """Create every missing table and add columns introduced later."""
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(_add_missing_columns)
 
 
 @asynccontextmanager

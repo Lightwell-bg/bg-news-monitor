@@ -28,9 +28,13 @@ RUNTIME_FILE_NAME = "runtime.yaml"
 MIN_IMPORTANCE_THRESHOLD = 0
 MAX_IMPORTANCE_THRESHOLD = 100
 
+MIN_PUBLISH_DELAY_MINUTES = 5
+MAX_PUBLISH_DELAY_MINUTES = 1440
+
 #: The only keys this store reads or writes.
 IMPORTANCE_THRESHOLD_KEY = "importance_threshold"
-KNOWN_KEYS: tuple[str, ...] = (IMPORTANCE_THRESHOLD_KEY,)
+PUBLISH_DELAY_MAX_KEY = "publish_delay_max_minutes"
+KNOWN_KEYS: tuple[str, ...] = (IMPORTANCE_THRESHOLD_KEY, PUBLISH_DELAY_MAX_KEY)
 
 _HEADER = (
     "# Настройки, изменяемые администратором из Telegram.\n"
@@ -57,6 +61,20 @@ def parse_importance_threshold(value: str | int) -> int:
         raise RuntimeSettingsError(
             f"Порог должен быть от {MIN_IMPORTANCE_THRESHOLD} "
             f"до {MAX_IMPORTANCE_THRESHOLD}."
+        )
+    return number
+
+
+def parse_publish_delay_max(value: str | int) -> int:
+    """Parse and range-check the longest publication delay, in minutes."""
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        raise RuntimeSettingsError("Задержка должна быть целым числом.") from None
+    if not MIN_PUBLISH_DELAY_MINUTES <= number <= MAX_PUBLISH_DELAY_MINUTES:
+        raise RuntimeSettingsError(
+            f"Задержка должна быть от {MIN_PUBLISH_DELAY_MINUTES} "
+            f"до {MAX_PUBLISH_DELAY_MINUTES} минут."
         )
     return number
 
@@ -103,6 +121,13 @@ class RuntimeSettingsStore:
                 )
             except RuntimeSettingsError:
                 logger.warning("saved importance threshold is invalid, using default")
+        if PUBLISH_DELAY_MAX_KEY in data:
+            try:
+                overrides[PUBLISH_DELAY_MAX_KEY] = parse_publish_delay_max(
+                    data[PUBLISH_DELAY_MAX_KEY]
+                )
+            except RuntimeSettingsError:
+                logger.warning("saved publish delay is invalid, using default")
         return overrides
 
     def save_importance_threshold(self, value: str | int) -> int:
@@ -110,6 +135,14 @@ class RuntimeSettingsStore:
         number = parse_importance_threshold(value)
         overrides = self.load()
         overrides[IMPORTANCE_THRESHOLD_KEY] = number
+        self._write(overrides)
+        return number
+
+    def save_publish_delay_max(self, value: str | int) -> int:
+        """Validate and persist the longest publication delay, returning it."""
+        number = parse_publish_delay_max(value)
+        overrides = self.load()
+        overrides[PUBLISH_DELAY_MAX_KEY] = number
         self._write(overrides)
         return number
 

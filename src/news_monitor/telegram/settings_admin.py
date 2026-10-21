@@ -20,7 +20,9 @@ from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMar
 
 from news_monitor.config.runtime_store import (
     MAX_IMPORTANCE_THRESHOLD,
+    MAX_PUBLISH_DELAY_MINUTES,
     MIN_IMPORTANCE_THRESHOLD,
+    MIN_PUBLISH_DELAY_MINUTES,
     RuntimeSettingsError,
     RuntimeSettingsStore,
     parse_importance_threshold,
@@ -58,14 +60,20 @@ CALLBACK_PREFIX = SETTINGS_PREFIX
 ACTION_OPEN = SETTINGS_OPEN_ACTION
 ACTION_THRESHOLD = "th"
 ACTION_THRESHOLD_INPUT = "thin"
+ACTION_DELAY = "dl"
+ACTION_DELAY_INPUT = "dlin"
 ACTION_CANCEL = "cxl"
 
-#: Kind of step-by-step input owned by this panel.
+#: Kinds of step-by-step input owned by this panel.
 INPUT_THRESHOLD = "threshold"
-SETTINGS_INPUT_KINDS: frozenset[str] = frozenset({INPUT_THRESHOLD})
+INPUT_DELAY = "delay"
+SETTINGS_INPUT_KINDS: frozenset[str] = frozenset({INPUT_THRESHOLD, INPUT_DELAY})
 
 #: Offsets offered as buttons around the current threshold.
 THRESHOLD_STEPS: tuple[int, ...] = (-10, -5, 5, 10)
+
+#: Offsets, in minutes, offered as buttons around the current maximum delay.
+DELAY_STEPS: tuple[int, ...] = (-30, -10, 10, 30)
 
 COMMANDS: tuple[str, ...] = ("settings",)
 
@@ -86,8 +94,8 @@ def _button(text: str, action: str, *parts: object) -> InlineKeyboardButton | No
     return button(CALLBACK_PREFIX, text, action, *parts)
 
 
-def render_settings(threshold: int) -> str:
-    """Render the settings screen with the current importance threshold."""
+def render_settings(threshold: int, delay_max: int) -> str:
+    """Render the settings screen with the threshold and the publication delay."""
     return "\n".join(
         [
             "⚙️ <b>Настройки</b>",
@@ -96,6 +104,24 @@ def render_settings(threshold: int) -> str:
             f"({MIN_IMPORTANCE_THRESHOLD}–{MAX_IMPORTANCE_THRESHOLD})",
             "Новость попадает в карточку на модерацию только при оценке "
             "не ниже порога.",
+            "",
+            f"Задержка публикации: случайно от {MIN_PUBLISH_DELAY_MINUTES} "
+            f"до <b>{delay_max}</b> мин",
+            "После «Одобрить» новость выходит в случайное время в этом "
+            "интервале; «Сразу» публикует без задержки.",
+        ]
+    )
+
+
+def render_delay_prompt(delay_max: int) -> str:
+    """Render the step-by-step question about the maximum publication delay."""
+    return "\n".join(
+        [
+            "⚙️ <b>Настройки</b>",
+            "",
+            f"Текущая максимальная задержка: <b>{delay_max}</b> мин.",
+            f"Отправьте новое значение от {MIN_PUBLISH_DELAY_MINUTES} "
+            f"до {MAX_PUBLISH_DELAY_MINUTES} минут одним сообщением.",
         ]
     )
 
@@ -113,8 +139,8 @@ def render_threshold_prompt(threshold: int) -> str:
     )
 
 
-def settings_keyboard(threshold: int) -> InlineKeyboardMarkup:
-    """Buttons that change the threshold without typing anything."""
+def settings_keyboard(threshold: int, delay_max: int) -> InlineKeyboardMarkup:
+    """Buttons that change the threshold and the delay without typing anything."""
     steps: list[InlineKeyboardButton | None] = []
     for offset in THRESHOLD_STEPS:
         target = min(MAX_IMPORTANCE_THRESHOLD, max(MIN_IMPORTANCE_THRESHOLD, threshold + offset))
@@ -122,9 +148,21 @@ def settings_keyboard(threshold: int) -> InlineKeyboardMarkup:
             continue
         sign = "➖" if offset < 0 else "➕"
         steps.append(_button(f"{sign} {target}", ACTION_THRESHOLD, target))
+    delay_steps: list[InlineKeyboardButton | None] = []
+    for offset in DELAY_STEPS:
+        target = min(
+            MAX_PUBLISH_DELAY_MINUTES,
+            max(MIN_PUBLISH_DELAY_MINUTES, delay_max + offset),
+        )
+        if target == delay_max:
+            continue
+        sign = "➖" if offset < 0 else "➕"
+        delay_steps.append(_button(f"⏱ {sign} {target} мин", ACTION_DELAY, target))
     return keyboard_of(
         steps,
         [_button("✏️ Ввести значение", ACTION_THRESHOLD_INPUT)],
+        delay_steps,
+        [_button("✏️ Ввести задержку", ACTION_DELAY_INPUT)],
         [
             button(SOURCES_PREFIX, "⬅ К источникам", SOURCES_LIST_ACTION),
             _button("\U0001f504 Обновить", ACTION_OPEN),
@@ -181,7 +219,7 @@ class SettingsAdminService:
         if parsed is None:
             return invalid_button_reply()
         action, parts = parsed
-        if action != ACTION_THRESHOLD_INPUT:
+        if action not in {ACTION_THRESHOLD_INPUT, ACTION_DELAY_INPUT}:
             self._pending.clear(user_id)
         try:
             return self._run_callback(action, parts, user_id)
@@ -206,8 +244,17 @@ class SettingsAdminService:
                 keyboard=cancel_keyboard(),
                 notice="Жду значение.",
             )
+        if action == ACTION_DELAY_INPUT:
+            self._pending.start(user_id, INPUT_DELAY)
+            return AdminReply(
+                text=render_delay_prompt(self.delay_max),
+                keyboard=cancel_keyboard(),
+                notice="Жду значение.",
+            )
         if action == ACTION_THRESHOLD and parts:
             return self.set_threshold(parts[0])
+        if action == ACTION_DELAY and parts:
+            return self.set_delay(parts[0])
         return invalid_button_reply()
 
     def execute_input(self, *, text: str, user_id: int | None) -> AdminReply:
@@ -222,11 +269,14 @@ class SettingsAdminService:
 
         value = " ".join(str(text or "").split())
         if len(value) > MAX_INPUT_LENGTH:
-            return self._prompt_again(TOO_LONG_MESSAGE)
+            return self._prompt_again(TOO_LONG_MESSAGE, pending.kind)
         try:
-            reply = self.set_threshold(value)
+            if pending.kind == INPUT_DELAY:
+                reply = self.set_delay(value)
+            else:
+                reply = self.set_threshold(value)
         except RuntimeSettingsError as error:
-            return self._prompt_again(str(error)[:NOTICE_LIMIT])
+            return self._prompt_again(str(error)[:NOTICE_LIMIT], pending.kind)
         self._pending.clear(user_id)
         return reply
 
@@ -242,11 +292,18 @@ class SettingsAdminService:
         """The importance threshold used by the running pipeline right now."""
         return int(self._settings.importance_threshold)
 
+    @property
+    def delay_max(self) -> int:
+        """The longest publication delay used by the running process, in minutes."""
+        return int(self._settings.publish_delay_max_minutes)
+
     def show_settings(self) -> AdminReply:
         """Show the settings screen."""
         current = self.threshold
+        delay = self.delay_max
         return AdminReply(
-            text=render_settings(current), keyboard=settings_keyboard(current)
+            text=render_settings(current, delay),
+            keyboard=settings_keyboard(current, delay),
         )
 
     def set_threshold(self, value: str | int) -> AdminReply:
@@ -259,24 +316,46 @@ class SettingsAdminService:
         saved = self._store.save_importance_threshold(number)
         self._settings.importance_threshold = saved
         logger.info("importance threshold changed to %s", saved)
-        text = f"{render_settings(saved)}\n\nПорог важности: {saved}\n{SAVED_MESSAGE}"
+        delay = self.delay_max
+        text = (
+            f"{render_settings(saved, delay)}\n\nПорог важности: {saved}\n{SAVED_MESSAGE}"
+        )
         return AdminReply(
             text=text,
-            keyboard=settings_keyboard(saved),
+            keyboard=settings_keyboard(saved, delay),
             notice=f"Порог важности: {saved}",
+        )
+
+    def set_delay(self, value: str | int) -> AdminReply:
+        """Validate, save and apply a new maximum publication delay."""
+        saved = self._store.save_publish_delay_max(value)
+        self._settings.publish_delay_max_minutes = saved
+        logger.info("publication delay maximum changed to %s minutes", saved)
+        threshold = self.threshold
+        text = (
+            f"{render_settings(threshold, saved)}\n\n"
+            f"Максимальная задержка: {saved} мин\n{SAVED_MESSAGE}"
+        )
+        return AdminReply(
+            text=text,
+            keyboard=settings_keyboard(threshold, saved),
+            notice=f"Максимальная задержка: {saved} мин",
         )
 
     # -------------------------------------------------------------- private
 
-    def _prompt_again(self, problem: str) -> AdminReply:
+    def _prompt_again(self, problem: str, kind: str = INPUT_THRESHOLD) -> AdminReply:
+        if kind == INPUT_DELAY:
+            low, high, unit = MIN_PUBLISH_DELAY_MINUTES, MAX_PUBLISH_DELAY_MINUTES, " минут"
+        else:
+            low, high, unit = MIN_IMPORTANCE_THRESHOLD, MAX_IMPORTANCE_THRESHOLD, ""
         text = "\n".join(
             [
                 "⚙️ <b>Настройки</b>",
                 "",
                 f"⚠️ {problem}",
                 "",
-                f"Отправьте значение от {MIN_IMPORTANCE_THRESHOLD} "
-                f"до {MAX_IMPORTANCE_THRESHOLD}.",
+                f"Отправьте значение от {low} до {high}{unit}.",
             ]
         )
         return AdminReply(
@@ -348,6 +427,8 @@ def build_settings_router(service: SettingsAdminService, settings: Settings) -> 
 
 __all__ = [
     "ACTION_CANCEL",
+    "ACTION_DELAY",
+    "ACTION_DELAY_INPUT",
     "ACTION_OPEN",
     "ACTION_THRESHOLD",
     "ACTION_THRESHOLD_INPUT",

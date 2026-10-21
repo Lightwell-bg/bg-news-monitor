@@ -6,7 +6,11 @@ from dataclasses import dataclass, field
 
 from news_monitor.storage.models import NewsStatus
 from news_monitor.telegram.bot import AdminOnly, handle_moderation_callback
-from news_monitor.telegram.card import ACTION_APPROVE, build_callback_data
+from news_monitor.telegram.card import (
+    ACTION_APPROVE,
+    ACTION_PUBLISH_NOW,
+    build_callback_data,
+)
 from news_monitor.telegram.moderation import ActionOutcome, ModerationService
 from news_monitor.telegram.publisher import ChannelPublisher
 from tests.conftest import ADMIN_ID, CHANNEL_ID, STRANGER_ID
@@ -77,7 +81,7 @@ async def test_admin_callback_publishes_and_clears_buttons(
 ) -> None:
     item = await _awaiting(repository)
     callback = FakeCallbackQuery(
-        build_callback_data(ACTION_APPROVE, item.id), FakeUser(ADMIN_ID)
+        build_callback_data(ACTION_PUBLISH_NOW, item.id), FakeUser(ADMIN_ID)
     )
 
     await handle_moderation_callback(callback, _service(repository, fake_bot, settings))
@@ -106,7 +110,7 @@ async def test_stranger_callback_changes_nothing(repository, fake_bot, settings)
 async def test_repeated_callback_publishes_once(repository, fake_bot, settings) -> None:
     item = await _awaiting(repository)
     service = _service(repository, fake_bot, settings)
-    data = build_callback_data(ACTION_APPROVE, item.id)
+    data = build_callback_data(ACTION_PUBLISH_NOW, item.id)
 
     first = FakeCallbackQuery(data, FakeUser(ADMIN_ID))
     second = FakeCallbackQuery(data, FakeUser(ADMIN_ID))

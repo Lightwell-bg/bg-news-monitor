@@ -19,6 +19,7 @@ from news_monitor.normalization.url import normalize_url
 from news_monitor.storage.models import (
     NewsItem,
     NewsStatus,
+    as_utc,
     ensure_transition,
     utcnow,
 )
@@ -276,6 +277,105 @@ class NewsRepository:
             target=NewsStatus.APPROVED,
             values={"decided_by": admin_id, "status_reason": ""},
         )
+
+    async def approve_now(self, item_id: int, *, admin_id: int) -> bool:
+        """Move AWAITING_APPROVAL or SCHEDULED to APPROVED in one atomic UPDATE."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                update(NewsItem)
+                .where(
+                    NewsItem.id == item_id,
+                    NewsItem.status.in_(
+                        [
+                            NewsStatus.AWAITING_APPROVAL.value,
+                            NewsStatus.SCHEDULED.value,
+                        ]
+                    ),
+                )
+                .values(
+                    status=NewsStatus.APPROVED.value,
+                    decided_by=admin_id,
+                    status_reason="",
+                    updated_at=utcnow(),
+                )
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def schedule(
+        self, item_id: int, *, admin_id: int, scheduled_at: datetime
+    ) -> bool:
+        """Move AWAITING_APPROVAL to SCHEDULED exactly once."""
+        return await self._conditional_update(
+            item_id,
+            expected=NewsStatus.AWAITING_APPROVAL,
+            target=NewsStatus.SCHEDULED,
+            values={
+                "decided_by": admin_id,
+                "scheduled_at": as_utc(scheduled_at),
+                "status_reason": "",
+            },
+        )
+
+    async def cancel_schedule(self, item_id: int) -> bool:
+        """Move SCHEDULED back to AWAITING_APPROVAL exactly once."""
+        return await self._conditional_update(
+            item_id,
+            expected=NewsStatus.SCHEDULED,
+            target=NewsStatus.AWAITING_APPROVAL,
+            values={"scheduled_at": None, "decided_by": None},
+        )
+
+    async def claim_due(self, now: datetime, *, limit: int = 10) -> list[int]:
+        """Atomically claim scheduled items whose time has come.
+
+        Each due item is moved SCHEDULED -> APPROVED by a conditional UPDATE;
+        only the ids this call actually won are returned, so two claimers (or a
+        claim and a publish-now press) can never both publish the same item.
+        """
+        moment = as_utc(now)
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(NewsItem.id)
+                .where(
+                    NewsItem.status == NewsStatus.SCHEDULED.value,
+                    NewsItem.scheduled_at <= moment,
+                )
+                .order_by(NewsItem.scheduled_at)
+                .limit(limit)
+            )
+            candidates = list(result.scalars().all())
+
+        claimed: list[int] = []
+        for item_id in candidates:
+            async with self._session_factory() as session:
+                outcome = await session.execute(
+                    update(NewsItem)
+                    .where(
+                        NewsItem.id == item_id,
+                        NewsItem.status == NewsStatus.SCHEDULED.value,
+                        NewsItem.scheduled_at <= moment,
+                    )
+                    .values(
+                        status=NewsStatus.APPROVED.value,
+                        status_reason="",
+                        updated_at=utcnow(),
+                    )
+                )
+                await session.commit()
+                if outcome.rowcount:
+                    claimed.append(item_id)
+        return claimed
+
+    async def list_scheduled(self) -> list[NewsItem]:
+        """Return every scheduled item, soonest first."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(NewsItem)
+                .where(NewsItem.status == NewsStatus.SCHEDULED.value)
+                .order_by(NewsItem.scheduled_at)
+            )
+            return list(result.scalars().all())
 
     async def reject_by_admin(self, item_id: int, *, admin_id: int) -> bool:
         """Move AWAITING_APPROVAL to REJECTED_BY_ADMIN exactly once."""
