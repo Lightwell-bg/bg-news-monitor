@@ -233,6 +233,7 @@ async def build_application(settings: Settings | None = None) -> Application:
         settings=settings,
         store=runtime_store,
         pending=pending_inputs,
+        checker=application.scheduler.run_sources_now,
     )
     application.moderators_admin = ModeratorsAdminService(
         access=access,

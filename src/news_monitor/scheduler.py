@@ -64,6 +64,27 @@ class PipelineScheduler:
             logger.info("source %s is no longer scheduled", source_id)
         return removed
 
+    def run_sources_now(self) -> int:
+        """Make every source job due right now and return how many were touched.
+
+        The jobs themselves are reused (not the pipelines), so max_instances=1
+        and coalesce keep a source that is already being checked from running
+        twice in parallel. Returns 0 when the scheduler is not running.
+        """
+        if not self._scheduler.running:
+            return 0
+        prefix = self.job_id("")
+        count = 0
+        for job in self._scheduler.get_jobs():
+            if not job.id.startswith(prefix):
+                continue
+            try:
+                job.modify(next_run_time=datetime.now(UTC))
+            except JobLookupError:
+                continue
+            count += 1
+        return count
+
     def add_pipeline(self, pipeline: NewsPipeline) -> int:
         """Register one pipeline and return the interval used, in minutes."""
         minutes = effective_interval_minutes(pipeline, self._settings)

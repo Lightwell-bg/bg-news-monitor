@@ -302,6 +302,7 @@ async def register_admin_commands(bot: Bot, settings: Settings) -> None:
         BotCommand(command="sources", description="Источники"),
         BotCommand(command="settings", description="Настройки"),
         BotCommand(command="moderators", description="Модераторы"),
+        BotCommand(command="check", description="Проверить новости сейчас"),
     ]
     for admin_id in settings.admin_ids:
         try:

@@ -101,7 +101,7 @@ WELCOME_TEXT = (
     "Доступно только «Одобрить» и «Отклонить»."
 )
 
-ADMIN_START_TEXT = "Вы администратор. Команды: /sources, /settings, /moderators"
+ADMIN_START_TEXT = "Вы администратор. Команды: /sources, /settings, /moderators, /check"
 MODERATOR_START_TEXT = (
     "Вы модератор. Карточки новостей приходят сюда, "
     "можно только одобрять и отклонять."

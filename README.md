@@ -123,6 +123,7 @@ The panel is available only to numeric IDs from `TELEGRAM_ADMIN_IDS` (or `TELEGR
 | `/sources` | Source list: one button per source |
 | `/settings` | Settings screen with the importance threshold |
 | `/moderators` | Moderators and daily report recipients |
+| `/check` | Check all enabled sources now (also the «🔄 Проверить новости сейчас» button in `/settings`; at most once per 2 minutes) |
 
 Everything else is done with buttons; no technical identifiers need to be typed:
 

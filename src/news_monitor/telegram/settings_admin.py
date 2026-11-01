@@ -13,6 +13,8 @@ single non-secret file and never touches ``.env``.
 from __future__ import annotations
 
 import logging
+import time
+from collections.abc import Callable
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -65,6 +67,12 @@ ACTION_THRESHOLD_INPUT = "thin"
 ACTION_DELAY = "dl"
 ACTION_DELAY_INPUT = "dlin"
 ACTION_CANCEL = "cxl"
+ACTION_CHECK = "chk"
+
+#: Global pause between two manual checks of all sources, in seconds.
+CHECK_COOLDOWN_SECONDS = 120.0
+
+NO_SOURCES_MESSAGE = "Нет включённых источников."
 
 #: Kinds of step-by-step input owned by this panel.
 INPUT_THRESHOLD = "threshold"
@@ -78,6 +86,7 @@ THRESHOLD_STEPS: tuple[int, ...] = (-10, -5, 5, 10)
 DELAY_STEPS: tuple[int, ...] = (-30, -10, 10, 30)
 
 COMMANDS: tuple[str, ...] = ("settings",)
+CHECK_COMMANDS: tuple[str, ...] = ("check",)
 
 SAVED_MESSAGE = "Сохранено и применено."
 
@@ -161,6 +170,7 @@ def settings_keyboard(threshold: int, delay_max: int) -> InlineKeyboardMarkup:
         sign = "➖" if offset < 0 else "➕"
         delay_steps.append(_button(f"⏱ {sign} {target} мин", ACTION_DELAY, target))
     return keyboard_of(
+        [_button("🔄 Проверить новости сейчас", ACTION_CHECK)],
         steps,
         [_button("✏️ Ввести значение", ACTION_THRESHOLD_INPUT)],
         delay_steps,
@@ -187,10 +197,15 @@ class SettingsAdminService:
         settings: Settings,
         store: RuntimeSettingsStore,
         pending: PendingInputStore | None = None,
+        checker: Callable[[], int] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._settings = settings
         self._store = store
         self._pending = pending if pending is not None else PendingInputStore()
+        self._checker = checker
+        self._clock = clock
+        self._last_check: float | None = None
 
     @property
     def pending_inputs(self) -> PendingInputStore:
@@ -212,6 +227,32 @@ class SettingsAdminService:
             return denied_reply()
         self._pending.clear(user_id)
         return self.show_settings()
+
+    def execute_check_command(self, *, user_id: int | None) -> AdminReply:
+        """Handle ``/check``: start an immediate check of all sources."""
+        if not self.is_authorized(user_id):
+            logger.warning("unauthorized check command ignored")
+            return denied_reply()
+        self._pending.clear(user_id)
+        return AdminReply(text=self.trigger_check())
+
+    def trigger_check(self) -> str:
+        """Make all sources due now, at most once per cooldown; return the notice."""
+        now = self._clock()
+        if self._last_check is not None:
+            remaining = CHECK_COOLDOWN_SECONDS - (now - self._last_check)
+            if remaining > 0:
+                seconds = max(1, int(remaining + 0.999))
+                return f"Проверка уже запускалась недавно, попробуйте через {seconds} с."
+        count = self._checker() if self._checker is not None else 0
+        if count <= 0:
+            return NO_SOURCES_MESSAGE
+        self._last_check = now
+        logger.info("manual check started for %s sources", count)
+        return (
+            f"Проверка запущена по {count} источникам. Новые карточки придут сюда "
+            "в течение нескольких минут. Если новых новостей нет, сообщений не будет."
+        )
 
     def execute_callback(self, *, data: str | None, user_id: int | None) -> AdminReply:
         """Handle one settings button press."""
@@ -235,6 +276,11 @@ class SettingsAdminService:
     ) -> AdminReply:
         if action == ACTION_OPEN:
             return self.show_settings()
+        if action == ACTION_CHECK:
+            reply = self.show_settings()
+            return AdminReply(
+                text=reply.text, keyboard=reply.keyboard, notice=self.trigger_check()
+            )
         if action == ACTION_CANCEL:
             reply = self.show_settings()
             return AdminReply(
@@ -374,6 +420,14 @@ async def handle_settings_command(
     await send_reply(message, service.execute_command(user_id=user_id))
 
 
+async def handle_check_command(
+    message: Message, service: SettingsAdminService
+) -> None:
+    """Handle ``/check`` from an administrator."""
+    user_id = getattr(getattr(message, "from_user", None), "id", None)
+    await send_reply(message, service.execute_check_command(user_id=user_id))
+
+
 async def handle_settings_callback(
     callback: CallbackQuery, service: SettingsAdminService
 ) -> None:
@@ -407,6 +461,15 @@ def build_settings_router(service: SettingsAdminService, settings: Settings) -> 
     async def _on_command(message: Message) -> None:
         await handle_settings_command(message, service)
 
+    @router.message(Command(*CHECK_COMMANDS), admin_only)
+    async def _on_check_command(message: Message) -> None:
+        await handle_check_command(message, service)
+
+    @router.message(Command(*CHECK_COMMANDS))
+    async def _on_unauthorized_check(message: Message) -> None:
+        logger.warning("unauthorized check command ignored")
+        await message.answer(DENIED_MESSAGE)
+
     @router.message(Command(*COMMANDS))
     async def _on_unauthorized_command(message: Message) -> None:
         logger.warning("unauthorized settings command ignored")
@@ -430,6 +493,9 @@ def build_settings_router(service: SettingsAdminService, settings: Settings) -> 
 
 __all__ = [
     "ACTION_CANCEL",
+    "ACTION_CHECK",
+    "CHECK_COMMANDS",
+    "CHECK_COOLDOWN_SECONDS",
     "ACTION_DELAY",
     "ACTION_DELAY_INPUT",
     "ACTION_OPEN",

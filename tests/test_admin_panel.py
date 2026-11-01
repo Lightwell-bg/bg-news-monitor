@@ -585,9 +585,11 @@ def test_the_settings_router_is_built_with_its_handlers(
     router = build_settings_router(panel, settings)
 
     assert router.name == "settings-admin"
-    assert len(router.message.handlers) == 3
+    assert len(router.message.handlers) == 5
     assert len(router.callback_query.handlers) == 2
-    guarded, fallback, waiting = router.message.handlers
+    guarded, check_guarded, check_fallback, fallback, waiting = router.message.handlers
+    assert any(isinstance(one.callback, AdminOnly) for one in check_guarded.filters)
+    assert not any(isinstance(one.callback, AdminOnly) for one in check_fallback.filters)
     assert any(isinstance(one.callback, AdminOnly) for one in guarded.filters)
     assert not any(isinstance(one.callback, AdminOnly) for one in fallback.filters)
     assert any(isinstance(one.callback, AdminOnly) for one in waiting.filters)
