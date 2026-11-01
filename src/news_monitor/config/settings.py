@@ -14,6 +14,7 @@ from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _ID_SPLIT_RE = re.compile(r"[,;\s]+")
+_HHMM_RE = re.compile(r"(\d{1,2}):(\d{2})")
 
 
 def _parse_ids(raw: Any) -> tuple[int, ...]:
@@ -70,6 +71,7 @@ class Settings(BaseSettings):
     check_interval_minutes: int = Field(default=20, ge=1)
     importance_threshold: int = Field(default=70, ge=0, le=100)
     publish_delay_max_minutes: int = Field(default=60, ge=5, le=1440)
+    daily_report_time: str = Field(default="09:00")
     database_url: str = Field(default="sqlite+aiosqlite:///./data/news.db")
     dry_run: bool = Field(default=True)
 
@@ -86,6 +88,19 @@ class Settings(BaseSettings):
         if value is None:
             return ""
         return str(value)
+
+    @field_validator("daily_report_time", mode="before")
+    @classmethod
+    def _validate_report_time(cls, value: Any) -> str:
+        """Accept only HH:MM (00:00 to 23:59); the report runs in Europe/Sofia."""
+        text = "09:00" if value is None else str(value).strip()
+        match = _HHMM_RE.fullmatch(text)
+        if match is None:
+            raise ValueError("DAILY_REPORT_TIME must look like HH:MM")
+        hour, minute = int(match.group(1)), int(match.group(2))
+        if hour > 23 or minute > 59:
+            raise ValueError("DAILY_REPORT_TIME must be between 00:00 and 23:59")
+        return f"{hour:02d}:{minute:02d}"
 
     @property
     def admin_ids(self) -> tuple[int, ...]:

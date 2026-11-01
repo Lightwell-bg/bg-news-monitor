@@ -25,8 +25,17 @@ from news_monitor.ai.schema import AIAssessment
 from news_monitor.config.runtime_store import MIN_PUBLISH_DELAY_MINUTES
 from news_monitor.config.settings import Settings
 from news_monitor.filters.guards import check_draft
-from news_monitor.storage.models import NewsItem, NewsStatus, utcnow
-from news_monitor.storage.repository import NewsRepository
+from news_monitor.storage.models import (
+    EVENT_APPROVE,
+    EVENT_CANCEL,
+    EVENT_PUBLISH_NOW,
+    EVENT_REJECT,
+    NewsItem,
+    NewsStatus,
+    utcnow,
+)
+from news_monitor.storage.repository import DecisionEvent, NewsRepository
+from news_monitor.telegram.access import AccessControl
 from news_monitor.telegram.card import (
     ACTION_APPROVE,
     ACTION_CANCEL_SCHEDULE,
@@ -104,6 +113,18 @@ def _result(outcome: ActionOutcome, item: NewsItem | None = None) -> ActionResul
     return ActionResult(outcome=outcome, message=MESSAGES[outcome], item=item)
 
 
+#: The only actions a moderator (not an administrator) may take.
+MODERATOR_ACTIONS: frozenset[str] = frozenset({ACTION_APPROVE, ACTION_REJECT})
+
+
+@dataclass(frozen=True, slots=True)
+class _Actor:
+    """Who pressed the button, as the event log records it."""
+
+    user_id: int
+    name: str = ""
+
+
 class ModerationService:
     """Applies an administrator decision to one news item."""
 
@@ -113,6 +134,7 @@ class ModerationService:
         repository: NewsRepository,
         publisher: ChannelPublisher,
         settings: Settings,
+        access: AccessControl | None = None,
         regenerator: Regenerator | None = None,
         clock: Callable[[], datetime] = utcnow,
         rng: random.Random | None = None,
@@ -120,9 +142,20 @@ class ModerationService:
         self._repository = repository
         self._publisher = publisher
         self._settings = settings
+        self._access = access if access is not None else AccessControl(settings, repository)
         self._regenerator = regenerator
         self._clock = clock
         self._rng = rng if rng is not None else random.SystemRandom()
+
+    @property
+    def repository(self) -> NewsRepository:
+        """The repository decisions are written to."""
+        return self._repository
+
+    @property
+    def access(self) -> AccessControl:
+        """The role lookup this service authorizes against."""
+        return self._access
 
     @property
     def publish_delay_max_minutes(self) -> int:
@@ -130,37 +163,80 @@ class ModerationService:
         return int(self._settings.publish_delay_max_minutes)
 
     def is_authorized(self, user_id: int | None) -> bool:
-        """Only numeric ids from the configured administrator list may decide."""
-        return self._settings.is_admin(user_id)
+        """Administrators and assigned moderators may press moderation buttons."""
+        return self._access.can_moderate(user_id)
 
-    async def handle_action(
-        self, *, action: str, item_id: int, user_id: int | None
-    ) -> ActionResult:
-        """Authorize and execute one moderation action."""
+    def _may_do(self, user_id: int | None, action: str, item_id: int) -> bool:
+        """Role check: administrators do everything, moderators approve/reject."""
         if not self.is_authorized(user_id):
             logger.warning(
                 "rejected moderation attempt for item %s from unauthorized user",
                 item_id,
             )
+            return False
+        if not self._access.is_admin(user_id) and action not in MODERATOR_ACTIONS:
+            logger.warning("moderator tried a restricted action on item %s", item_id)
+            return False
+        return True
+
+    async def handle_action(
+        self,
+        *,
+        action: str,
+        item_id: int,
+        user_id: int | None,
+        user_name: str = "",
+    ) -> ActionResult:
+        """Authorize and execute one moderation action.
+
+        Administrators may do everything; a moderator only approves or rejects.
+        """
+        if not self._may_do(user_id, action, item_id):
             return _result(ActionOutcome.DENIED)
+        assert user_id is not None
 
         item = await self._repository.get(item_id)
         if item is None:
             return _result(ActionOutcome.NOT_FOUND)
 
+        # The role may have been revoked while the lookup was awaited. Check
+        # again; nothing is awaited between this check and the conditional
+        # UPDATE issued by the handler below.
+        if not self._may_do(user_id, action, item_id):
+            return _result(ActionOutcome.DENIED)
+
+        actor = _Actor(user_id=user_id, name=user_name)
         if action == ACTION_APPROVE:
-            return await self._schedule(item_id, user_id)
+            return await self._schedule(item_id, actor)
         if action == ACTION_PUBLISH_NOW:
-            return await self._publish_now(item_id, user_id)
+            return await self._publish_now(item_id, actor)
         if action == ACTION_CANCEL_SCHEDULE:
-            return await self._unschedule(item_id)
+            return await self._unschedule(item_id, actor)
         if action == ACTION_REJECT:
-            return await self._reject(item_id, user_id)
+            return await self._reject(item_id, actor)
         if action == ACTION_REGENERATE:
             return await self._regenerate(item)
         return _result(ActionOutcome.UNKNOWN_ACTION, item)
 
-    async def _schedule(self, item_id: int, admin_id: int) -> ActionResult:
+    def _event(self, actor: "_Actor", action: str) -> DecisionEvent:
+        """The log entry written atomically with the decision."""
+        return DecisionEvent(
+            user_id=actor.user_id, user_name=actor.name, action=action, at=self._clock()
+        )
+
+    async def _refresh_name(self, item_id: int, actor: "_Actor") -> None:
+        """Refresh a moderator's stored display name; best effort only."""
+        try:
+            if actor.name and self._access.is_moderator(actor.user_id):
+                await self._repository.update_moderator_name(actor.user_id, actor.name)
+        except Exception as exc:  # noqa: BLE001 - the decision is already stored
+            logger.warning(
+                "cannot update moderator name after item %s: %s",
+                item_id,
+                type(exc).__name__,
+            )
+
+    async def _schedule(self, item_id: int, actor: "_Actor") -> ActionResult:
         """Schedule publication at a random moment within the allowed window."""
         low = MIN_PUBLISH_DELAY_MINUTES * 60
         high = max(self._settings.publish_delay_max_minutes * 60, low)
@@ -168,11 +244,15 @@ class ModerationService:
         scheduled_at = self._clock() + timedelta(seconds=delay_seconds)
 
         won = await self._repository.schedule(
-            item_id, admin_id=admin_id, scheduled_at=scheduled_at
+            item_id,
+            admin_id=actor.user_id,
+            scheduled_at=scheduled_at,
+            event=self._event(actor, EVENT_APPROVE),
         )
         item = await self._repository.get(item_id)
         if not won:
             return _result(ActionOutcome.ALREADY_HANDLED, item)
+        await self._refresh_name(item_id, actor)
 
         minutes = max(1, round(delay_seconds / 60))
         message = (
@@ -183,23 +263,31 @@ class ModerationService:
             outcome=ActionOutcome.SCHEDULED, message=message, item=item
         )
 
-    async def _unschedule(self, item_id: int) -> ActionResult:
-        won = await self._repository.cancel_schedule(item_id)
+    async def _unschedule(self, item_id: int, actor: "_Actor") -> ActionResult:
+        won = await self._repository.cancel_schedule(
+            item_id, event=self._event(actor, EVENT_CANCEL)
+        )
         item = await self._repository.get(item_id)
         if not won:
             return _result(ActionOutcome.ALREADY_HANDLED, item)
+        await self._refresh_name(item_id, actor)
         return _result(ActionOutcome.UNSCHEDULED, item)
 
-    async def _publish_now(self, item_id: int, admin_id: int) -> ActionResult:
+    async def _publish_now(self, item_id: int, actor: "_Actor") -> ActionResult:
         """Publish immediately from AWAITING_APPROVAL or SCHEDULED, exactly once.
 
         The conditional update is the single point of serialization: a second
         press finds the item already APPROVED and never publishes.
         """
-        won = await self._repository.approve_now(item_id, admin_id=admin_id)
+        won = await self._repository.approve_now(
+            item_id,
+            admin_id=actor.user_id,
+            event=self._event(actor, EVENT_PUBLISH_NOW),
+        )
         if not won:
             item = await self._repository.get(item_id)
             return _result(ActionOutcome.ALREADY_HANDLED, item)
+        await self._refresh_name(item_id, actor)
         return await self._publish_claimed(item_id)
 
     async def publish_due(self) -> list[ActionResult]:
@@ -254,12 +342,17 @@ class ModerationService:
         )
         return _result(outcome, await self._repository.get(item_id))
 
-    async def _reject(self, item_id: int, admin_id: int) -> ActionResult:
-        won = await self._repository.reject_by_admin(item_id, admin_id=admin_id)
+    async def _reject(self, item_id: int, actor: "_Actor") -> ActionResult:
+        won = await self._repository.reject_by_admin(
+            item_id,
+            admin_id=actor.user_id,
+            event=self._event(actor, EVENT_REJECT),
+        )
         if not won:
             return _result(
                 ActionOutcome.ALREADY_HANDLED, await self._repository.get(item_id)
             )
+        await self._refresh_name(item_id, actor)
         return _result(ActionOutcome.REJECTED, await self._repository.get(item_id))
 
     async def _regenerate(self, item: NewsItem) -> ActionResult:

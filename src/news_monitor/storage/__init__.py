@@ -9,7 +9,10 @@ from news_monitor.storage.db import (
 from news_monitor.storage.models import (
     ALLOWED_TRANSITIONS,
     Base,
+    CardMessage,
     InvalidTransitionError,
+    ModerationEvent,
+    Moderator,
     NewsItem,
     NewsStatus,
     can_transition,
@@ -20,8 +23,11 @@ from news_monitor.storage.repository import DuplicateReason, NewsRepository
 __all__ = [
     "ALLOWED_TRANSITIONS",
     "Base",
+    "CardMessage",
     "DuplicateReason",
     "InvalidTransitionError",
+    "ModerationEvent",
+    "Moderator",
     "NewsItem",
     "NewsRepository",
     "NewsStatus",

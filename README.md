@@ -1,164 +1,181 @@
 # BG News Monitor
 
-MVP-сервис для отбора важных новостей Болгарии для русскоязычной аудитории. Он находит новые материалы, исключает дубликаты, готовит русский черновик и отправляет кандидата администратору в Telegram.
+An MVP service that selects important Bulgarian news for a Russian-speaking audience. It finds new articles, removes duplicates, prepares a Russian draft and sends the candidate to an administrator in Telegram.
 
-Публикация в канал возможна только после кнопки «✅ Одобрить» (со случайной задержкой) или «⚡ Сразу». AI не публикует сообщения и не заменяет проверку прав и статуса кодом.
+Publishing to the channel is only possible after the «✅ Одобрить» (Approve, with a random delay) or «⚡ Сразу» (Publish now) button. The AI never publishes anything and never replaces the permission and status checks done in code.
 
-## Что делает сервис
+Russian version: [README_RU.md](README_RU.md). Quick start by steps (in Russian): [docs/QUICK_START.md](docs/QUICK_START.md).
 
-1. Планировщик опрашивает включённые источники с интервалом источника.
-2. Адаптер разбирает страницу списка и находит ссылки на статьи.
-3. Ссылка нормализуется; повтор по нормализованному URL или по хешу содержимого получает статус `DUPLICATE`.
-4. Детерминированные правила отсекают служебные разделы, слишком короткие и слишком старые материалы **до** обращения к AI.
-5. OpenRouter возвращает оценку и русский черновик; ответ проверяется Pydantic-схемой.
-6. Код-гарды отклоняют черновик, который копирует статью дословно или содержит числа, отсутствующие в источнике.
-7. Кандидат уходит личной карточкой администратору. После «Одобрить» новость ставится в расписание (`SCHEDULED`, случайно 5–N минут), после «Сразу» или наступления времени переходит в `APPROVED`, и только тогда код публикует пост в канал.
+## What the service does
 
-Поддерживаемые источники (адаптеры главных страниц):
+1. The scheduler polls the enabled sources at each source's interval.
+2. An adapter parses the listing page and finds article links.
+3. The link is normalized; a repeat by normalized URL or by content hash gets the `DUPLICATE` status.
+4. Deterministic rules drop service sections, too-short and too-old items **before** the AI is called.
+5. OpenRouter returns an assessment and a Russian draft; the answer is validated with a Pydantic schema.
+6. Code guards reject a draft that copies the article verbatim or contains numbers absent from the source.
+7. The candidate goes to the administrators as a private card. After «Approve» the news is scheduled (`SCHEDULED`, random 5–N minutes); after «Publish now», or when the time comes, it becomes `APPROVED`, and only then does the code post it to the channel.
 
-| Источник | Сайт | Состояние в `config/sources.yaml` |
+Supported sources (homepage adapters):
+
+| Source | Site | State in `config/sources.yaml` |
 | --- | --- | --- |
-| **Flagman** | https://www.flagman.bg/ | включён |
-| **BG24** | https://bg-24.com/ | выключен, включается из Telegram |
-| **Burgas24** | https://www.burgas24.bg/ | включён, опрос раз в 30 минут |
+| **Flagman** | https://www.flagman.bg/ | enabled |
+| **BG24** | https://bg-24.com/ | disabled, can be enabled from Telegram |
+| **Burgas24** | https://www.burgas24.bg/ | enabled, polled every 30 minutes |
 
-Адаптер Burgas24 берёт с главной страницы только статьи вида `/novini/<рубрика>/<заголовок>-<номер>` на домене `burgas24.bg`; обяви, видео, темы, архивы по дням, спорт, справочник и сайты-партнёры сети пропускаются. Страница без заголовка или без текста статьи не обрабатывается.
+The Burgas24 adapter takes only articles of the form `/novini/<rubric>/<title>-<number>` on the `burgas24.bg` domain from the homepage; classifieds, videos, topics, per-day archives, sport, the directory and the network's partner sites are skipped. A page without a title or article text is not processed.
 
-Администратор управляет источниками прямо из Telegram: включение и выключение, интервал опроса, разделы и темы включения/исключения. Изменения проверяются Pydantic-схемой, сохраняются атомарной заменой `config/sources.yaml` и применяются работающим процессом без дублирования задач планировщика.
+Administrators manage sources straight from Telegram: enable and disable, polling interval, sections and inclusion/exclusion topics. Changes are validated with a Pydantic schema, saved by atomically replacing `config/sources.yaml` and applied by the running process without duplicating scheduler jobs.
 
-## Стек
+## Stack
 
 - Python 3.12, aiogram 3, httpx, selectolax, pydantic-settings, PyYAML;
 - SQLAlchemy 2, aiosqlite, SQLite, APScheduler;
-- OpenRouter HTTP API и pytest.
+- OpenRouter HTTP API and pytest.
 
-## Структура
+## Structure
 
 ```text
 src/news_monitor/
-  app.py              # композиция и точка входа
-  pipeline.py         # сценарий: список -> статья -> дедуп -> фильтр -> AI -> карточка
-  scheduler.py        # интервалы источников (APScheduler)
-  logging_config.py   # логирование с обязательной редактурой секретов
-  config/             # Settings, чтение и безопасное изменение sources.yaml
-  sources/            # контракты, адаптеры Flagman, BG24 и Burgas24, HTTP-загрузка
-  normalization/      # нормализация URL и хеш содержимого
-  filters/            # детерминированные правила и код-гарды черновика
-  ai/                 # промпт, строгая Pydantic-схема, клиент OpenRouter
-  storage/            # модели, статусы, атомарные переходы
-  telegram/           # карточка, права, callback, публикация, админ-панель
-config/sources.yaml   # описание источников
-config/runtime.yaml   # настройки, изменённые администратором (создаётся автоматически)
-tests/                # тесты и локальные HTML-fixtures
+  app.py              # composition root and entry point
+  pipeline.py         # flow: listing -> article -> dedup -> filter -> AI -> card
+  scheduler.py        # source intervals (APScheduler)
+  reports.py          # daily moderation report
+  logging_config.py   # logging with mandatory secret redaction
+  config/             # Settings, reading and safely editing sources.yaml
+  sources/            # contracts, Flagman, BG24 and Burgas24 adapters, HTTP fetching
+  normalization/      # URL normalization and content hash
+  filters/            # deterministic rules and draft code guards
+  ai/                 # prompt, strict Pydantic schema, OpenRouter client
+  storage/            # models, statuses, atomic transitions
+  telegram/           # card, roles, callbacks, publishing, admin panel
+config/sources.yaml   # source definitions
+config/runtime.yaml   # settings changed by an administrator (created automatically)
+tests/                # tests and local HTML fixtures
 ```
 
-## Запуск
+## Running
 
-Виртуальное окружение (Windows):
+Virtual environment (Windows):
 
 ```bash
 python -m venv .venv
 source .venv/Scripts/activate
 ```
 
-Установка зависимостей:
+Install dependencies:
 
 ```bash
 pip install -e ".[dev]"
 ```
 
-Запуск сервиса:
+Run the service:
 
 ```bash
 python -m news_monitor
 ```
 
-Тесты:
+Tests:
 
 ```bash
 pytest
 ```
 
-Тесты не выходят в сеть: автоматическая фикстура блокирует исходящие соединения, HTML берётся из `tests/fixtures/`, Telegram и AI заменены фейками.
+Tests do not use the network: an automatic fixture blocks outgoing connections, HTML comes from `tests/fixtures/`, Telegram and the AI are replaced with fakes.
 
-## Подключение сторонних сервисов
+## Connecting third-party services
 
-Скопируйте `.env.example` в `.env` и заполните значения. `.env` не коммитится; `.env.example` хранит только пустые примеры.
+Copy `.env.example` to `.env` and fill in the values. `.env` is not committed; `.env.example` holds empty examples only.
 
-| Переменная | Назначение | Где взять |
+| Variable | Purpose | Where to get it |
 | --- | --- | --- |
-| `TELEGRAM_BOT_TOKEN` | Токен бота, который шлёт карточки и пост | [@BotFather](https://t.me/BotFather) → `/newbot`; см. [документацию](https://core.telegram.org/bots/features#botfather) |
-| `TELEGRAM_ADMIN_IDS` | Числовые ID администраторов через запятую; только они управляют кнопками | [@userinfobot](https://t.me/userinfobot) или `getUpdates` |
-| `TELEGRAM_ADMIN_ID` | Один администратор, обратная совместимость | То же |
-| `TELEGRAM_CHANNEL_ID` | Канал публикации: `@username` или числовой `-100...` | Добавьте бота администратором канала |
-| `OPENROUTER_API_KEY` | Ключ OpenRouter | [openrouter.ai/keys](https://openrouter.ai/keys); см. [документацию](https://openrouter.ai/docs) |
-| `OPENROUTER_MODEL` | Идентификатор модели | [openrouter.ai/models](https://openrouter.ai/models) |
-| `CHECK_INTERVAL_MINUTES` | Минимальный интервал опроса | — |
-| `IMPORTANCE_THRESHOLD` | Порог важности 0–100 для карточки; значение по умолчанию, дальше меняется из Telegram | — |
-| `PUBLISH_DELAY_MAX_MINUTES` | Максимальная задержка публикации после «Одобрить», 5–1440 минут (по умолчанию 60); дальше меняется из Telegram | — |
-| `DATABASE_URL` | Строка SQLAlchemy, по умолчанию локальный SQLite | — |
-| `DRY_RUN` | `true` — карточка отправляется, пост в канал не уходит | — |
+| `TELEGRAM_BOT_TOKEN` | Token of the bot that sends cards and posts | [@BotFather](https://t.me/BotFather) → `/newbot`; see the [docs](https://core.telegram.org/bots/features#botfather) |
+| `TELEGRAM_ADMIN_IDS` | Numeric administrator IDs, comma-separated; only they control the buttons | [@userinfobot](https://t.me/userinfobot) or `getUpdates` |
+| `TELEGRAM_ADMIN_ID` | A single administrator, backward compatibility | Same |
+| `TELEGRAM_CHANNEL_ID` | Publication channel: `@username` or numeric `-100...` | Add the bot as a channel administrator |
+| `OPENROUTER_API_KEY` | OpenRouter key | [openrouter.ai/keys](https://openrouter.ai/keys); see the [docs](https://openrouter.ai/docs) |
+| `OPENROUTER_MODEL` | Model identifier | [openrouter.ai/models](https://openrouter.ai/models) |
+| `CHECK_INTERVAL_MINUTES` | Minimum polling interval | — |
+| `IMPORTANCE_THRESHOLD` | Importance threshold 0–100 for a card; the default value, later changed from Telegram | — |
+| `PUBLISH_DELAY_MAX_MINUTES` | Maximum publication delay after «Approve», 5–1440 minutes (default 60); later changed from Telegram | — |
+| `DAILY_REPORT_TIME` | Time of the daily moderation report, `HH:MM` Sofia time (default `09:00`); recipients are chosen in the bot | — |
+| `DATABASE_URL` | SQLAlchemy URL, local SQLite by default | — |
+| `DRY_RUN` | `true` — the card is sent, nothing goes to the channel | — |
 
-### Подготовка Telegram
+### Telegram setup
 
-1. Создайте бота у `@BotFather` и сохраните токен в `.env`.
-2. Напишите боту в личном чате, иначе он не сможет отправить карточку.
-3. Добавьте бота администратором канала с правом публикации сообщений.
-4. Укажите `TELEGRAM_CHANNEL_ID`. При `DRY_RUN=true` канал не обязателен.
+1. Create a bot with `@BotFather` and save the token in `.env`.
+2. Write to the bot in a private chat, otherwise it cannot send you a card.
+3. Add the bot as a channel administrator with the right to post messages.
+4. Set `TELEGRAM_CHANNEL_ID`. With `DRY_RUN=true` the channel is optional.
 
-### Дополнительные необязательные переменные
+### Additional optional variables
 
-Имеют разумные значения по умолчанию и нужны редко: `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT_SECONDS`, `SOURCES_FILE`, `MAX_ARTICLES_PER_RUN`, `REQUEST_TIMEOUT_SECONDS`, `USER_AGENT`.
+They have sensible defaults and are rarely needed: `OPENROUTER_BASE_URL`, `OPENROUTER_TIMEOUT_SECONDS`, `SOURCES_FILE`, `MAX_ARTICLES_PER_RUN`, `REQUEST_TIMEOUT_SECONDS`, `USER_AGENT`.
 
-## Админ-панель в Telegram
+## Telegram admin panel
 
-Панель доступна только числовым ID из `TELEGRAM_ADMIN_IDS` (или `TELEGRAM_ADMIN_ID`). Права проверяются дважды: фильтром роутера и сервисом.
+The panel is available only to numeric IDs from `TELEGRAM_ADMIN_IDS` (or `TELEGRAM_ADMIN_ID`). Permissions are checked twice: by the router filter and by the service.
 
-| Команда | Действие |
+| Command | Action |
 | --- | --- |
-| `/sources` | Список источников: одна кнопка на источник |
-| `/settings` | Экран настроек с порогом важности |
+| `/sources` | Source list: one button per source |
+| `/settings` | Settings screen with the importance threshold |
+| `/moderators` | Moderators and daily report recipients |
 
-Всё остальное делается кнопками, вводить технические идентификаторы не нужно:
+Everything else is done with buttons; no technical identifiers need to be typed:
 
-- список → кнопка источника → карточка с состоянием, интервалом, разделами и темами;
-- в карточке: включить/выключить, интервал ±5 минут или «✏️ Интервал», разделы, темы включения и исключения;
-- «➕ Добавить раздел/тему» и «✏️ Интервал» запускают короткий диалог: панель ждёт одно сообщение и показывает кнопку «✖️ Отмена». Раздел отправляется как `Название | https://…`;
-- незавершённый вопрос снимается кнопкой «Отмена», любой другой кнопкой панели или по таймауту, поэтому случайное сообщение не будет истолковано как ответ;
-- неверный ответ ничего не сохраняет: панель показывает причину и повторяет вопрос.
+- list → source button → card with state, interval, sections and topics;
+- in the card: enable/disable, interval ±5 minutes or «✏️ Интервал», sections, inclusion and exclusion topics;
+- «➕ Добавить раздел/тему» and «✏️ Интервал» start a short dialog: the panel waits for one message and shows a «✖️ Отмена» button. A section is sent as `Name | https://…`;
+- an unfinished question is dropped by «Отмена», by any other panel button, or by timeout, so a stray message is never taken for an answer;
+- a wrong answer saves nothing: the panel shows the reason and repeats the question.
 
-### Порог важности
+### Importance threshold
 
-Экран «⚙️ Настройки» показывает текущий `IMPORTANCE_THRESHOLD` и меняет его кнопками ±5/±10 или вводом значения. Значение проверяется диапазоном 0–100, сразу применяется к работающему процессу и сохраняется в `config/runtime.yaml` рядом с `sources.yaml`.
+The «⚙️ Настройки» screen shows the current `IMPORTANCE_THRESHOLD` and changes it with ±5/±10 buttons or by typing a value. The value is validated against 0–100, applied to the running process at once and saved to `config/runtime.yaml` next to `sources.yaml`.
 
-### Задержка публикации
+### Publication delay
 
-На карточке три действия с новостью:
+A card has three actions:
 
-- «✅ Одобрить (5–N мин)» ставит публикацию на случайное время от 5 до N минут (N — максимальная задержка, по умолчанию 60). Карточка получает строку «⏰ Публикация в HH:MM (София)» и кнопки «⚡ Опубликовать сейчас» и «↩️ Отменить»;
-- «⚡ Сразу» публикует без задержки;
-- «↩️ Отменить» на запланированной карточке возвращает новость в ожидание решения со всеми прежними кнопками.
+- «✅ Одобрить (5–N мин)» schedules publication at a random time between 5 and N minutes (N is the maximum delay, 60 by default). The card gets a line «⏰ Публикация в HH:MM (София)» and the buttons «⚡ Опубликовать сейчас» and «↩️ Отменить»;
+- «⚡ Сразу» publishes without delay;
+- «↩️ Отменить» on a scheduled card returns the news to awaiting a decision with all the original buttons.
 
-N меняется в «⚙️ Настройки»: кнопки ➖/➕ (±10, ±30 минут) или «✏️ Ввести задержку». Допустимо от 5 до 1440 минут; значение применяется сразу и сохраняется в `config/runtime.yaml`. Значение по умолчанию задаёт переменная `PUBLISH_DELAY_MAX_MINUTES` (по умолчанию 60, диапазон 5–1440).
+N is changed in «⚙️ Настройки»: ➖/➕ buttons (±10, ±30 minutes) or «✏️ Ввести задержку». Allowed range is 5 to 1440 minutes; the value is applied at once and saved to `config/runtime.yaml`. The default comes from `PUBLISH_DELAY_MAX_MINUTES` (60 by default, range 5–1440).
 
-Расписание хранится в базе, поэтому переживает перезапуск: планировщик проверяет очередь каждые ~30 секунд, а просроченные за время простоя новости публикуются при первой проверке после старта. После публикации по расписанию карточка администратора обновляется (кнопки убираются, добавляется статус). Время показывается по Софии (Europe/Sofia), в базе хранится UTC.
+The schedule is stored in the database, so it survives a restart: the scheduler checks the queue about every 30 seconds, and items that became overdue during downtime are published at the first check after startup. After a scheduled publication the administrator card is updated (buttons removed, status added). Time is shown in Sofia time (Europe/Sofia); the database stores UTC.
 
-`config/runtime.yaml` содержит только несекретные значения, создаётся при первом изменении и не коммитится. При старте сохранённое значение перекрывает `IMPORTANCE_THRESHOLD` из окружения; чтобы вернуться к значению из `.env`, удалите файл. `.env` панель не читает и не изменяет.
+`config/runtime.yaml` holds non-secret values only, is created on the first change and is not committed. At startup a saved value overrides `IMPORTANCE_THRESHOLD` from the environment; delete the file to return to the `.env` value. The panel never reads or changes `.env`.
 
-Как работает сохранение источников:
+How source saving works:
 
-- изменение сначала проверяется Pydantic-схемой целиком; при ошибке файл остаётся нетронутым, а администратор получает понятное сообщение;
-- запись идёт во временный файл и завершается атомарной заменой только `SOURCES_FILE`; комментарии в начале файла сохраняются;
-- после сохранения процесс перечитывает файл и переустанавливает задачи планировщика по одному job на источник, поэтому смена интервала не создаёт дублей;
-- если применить изменение в рантайме нельзя (например, у источника нет зарегистрированного адаптера), настройка всё равно сохранена, а в ответе явно указано, что нужен перезапуск;
-- `.env` и токены здесь не редактируются и не отображаются;
-- callback-данные кнопок укладываются в лимит Telegram в 64 байта, а длинные экраны обрезаются по строкам.
+- a change is first validated as a whole by the Pydantic schema; on error the file stays untouched and the administrator gets a clear message;
+- the write goes to a temporary file and finishes with an atomic replacement of `SOURCES_FILE` only; comments at the top of the file are kept;
+- after saving, the process re-reads the file and re-registers scheduler jobs, one job per source, so an interval change creates no duplicates;
+- if a change cannot be applied at runtime (for example a source has no registered adapter), the setting is still saved and the answer says explicitly that a restart is needed;
+- `.env` and tokens are neither edited nor shown here;
+- button callback data fits the Telegram limit of 64 bytes, and long screens are cut by lines.
 
-## Деплой на VPS через Docker
+## Moderators and daily report
 
-Сервис не открывает HTTP-порты: он работает через Telegram long polling. На VPS с уже
-установленными Docker и Docker Compose клонируйте public-репозиторий под пользователем,
-который будет обслуживать проект (в примерах — `vlad`):
+Administrators (`TELEGRAM_ADMIN_IDS`) can assign moderators right in the bot. A moderator receives the same news cards but sees only the «Одобрить» (Approve) and «Отклонить» (Reject) buttons: «Сразу», «Отменить», regeneration, sources, settings and this section are not available to them. Whoever presses first decides; the other card recipients see who decided.
+
+How to assign:
+
+1. Send the bot `/moderators` (or press «👥 Модераторы» in `/settings`).
+2. Press «➕ Добавить» and pick the person in one of three ways: the «👤 Выбрать пользователя» button at the bottom of the screen, a numeric Telegram ID sent as a message, or a message forwarded from that person. If the person hides their account, ask them to send `/start` to the bot: it shows their ID.
+3. The new moderator must open the bot once and press «Запустить» (Start), otherwise Telegram does not let the bot write to them first. Any stranger who sends `/start` only sees their own ID.
+
+To remove: `/moderators` → «🗑 Name» → «Да, удалить». At most 50 moderators. An administrator cannot be a moderator: they already have every right.
+
+Daily report: every day at `DAILY_REPORT_TIME` (format `HH:MM`, default `09:00`, Europe/Sofia time) the chosen administrators receive a report for the previous day: how many items were approved, rejected, cancelled and who made the decisions. Recipients are chosen in the bot: `/moderators` → «📊 Отчёт» (by default only the owner, the first ID in `TELEGRAM_ADMIN_IDS`, receives it; the list is stored in `config/runtime.yaml`). The «📨 Прислать сводку за сегодня» button sends the report to the person who pressed it only. Moderators are stored in the database and survive a restart.
+
+## Deploying to a VPS with Docker
+
+The service opens no HTTP ports: it works through Telegram long polling. On a VPS where Docker and Docker Compose are already installed, clone the public repository as the user who will maintain the project (`vlad` in the examples):
 
 ```bash
 sudo mkdir -p /opt/bg-news-monitor
@@ -167,8 +184,7 @@ git clone https://github.com/Lightwell-bg/bg-news-monitor.git /opt/bg-news-monit
 cd /opt/bg-news-monitor
 ```
 
-Создайте секретный файл конфигурации и заполните обязательные значения из таблицы выше.
-Для первого запуска оставьте `DRY_RUN=true`:
+Create the secret configuration file and fill in the required values from the table above. Keep `DRY_RUN=true` for the first start:
 
 ```bash
 cp .env.example .env
@@ -178,19 +194,17 @@ sudo docker compose ps
 sudo docker compose logs -f --tail=100 news-monitor
 ```
 
-Остановка просмотра логов через `Ctrl+C` не останавливает контейнер. Сам сервис остановить
-можно командой:
+Stopping the log view with `Ctrl+C` does not stop the container. Stop the service itself with:
 
 ```bash
 sudo docker compose down
 ```
 
-Каталог `data/` не удаляйте: в нём хранятся SQLite, сохранённые через Telegram источники и
-runtime-настройки. Они переживают пересборку и обновление контейнера.
+Do not delete the `data/` directory: it holds SQLite (including moderators), the sources saved through Telegram and the runtime settings. They survive rebuilding and updating the container.
 
-### Обновление на VPS
+### Updating on the VPS
 
-После push новой версии в GitHub:
+After pushing a new version to GitHub:
 
 ```bash
 cd /opt/bg-news-monitor
@@ -199,13 +213,13 @@ sudo docker compose up -d --build
 sudo docker compose logs --tail=100 news-monitor
 ```
 
-## Безопасность и качество
+## Security and quality
 
-- Управляющие кнопки и команды управления источниками доступны только числовым ID из `TELEGRAM_ADMIN_IDS`; права проверяются и фильтром роутера, и сервисом.
-- Повторное нажатие кнопки не создаёт второй пост: переход статуса выполняется условным UPDATE, который выигрывает ровно один вызов.
-- Уникальность обеспечивают нормализованный URL и хеш содержимого.
-- Невалидный AI-ответ не создаёт карточку и публикацию.
-- Черновик с дословной копией статьи или с числами, которых нет в источнике, отклоняется кодом.
-- Ссылка на исходный материал обязательна в публикации.
-- Под каждой публикацией идёт одна цитата-блок с ссылками на проекты, 4 строки по 2–3 ссылки через « · » (список `CHANNEL_FOOTER_ROWS` в `src/news_monitor/telegram/card.py`): документы и жизнь в Болгарии, вопросы о Болгарии, подбор ВНЖ и ПМЖ, помощник BGINFO, акции Lidl/Kaufland/BILLA, новости Болгарии, отзывы об аренде, совместные покупки, болгарский с VIRA. Адреса показаны только как ссылки на тексте. Блок стоит после ссылки на источник, поэтому превью в Telegram строится по статье.
-- Токены и ключи берутся только из окружения, маскируются в логах и не попадают в отчёты.
+- Control buttons and source management commands are available only to numeric IDs from `TELEGRAM_ADMIN_IDS`; permissions are checked by both the router filter and the service. Moderators can only approve and reject.
+- Pressing a button twice does not create a second post: the status transition is a conditional UPDATE that exactly one call wins.
+- Uniqueness is guaranteed by the normalized URL and the content hash.
+- An invalid AI answer creates neither a card nor a post.
+- A draft with a verbatim copy of the article or with numbers absent from the source is rejected by code.
+- A link to the original material is mandatory in the post.
+- Each post is followed by one quote block with project links, 4 rows of 2–3 links separated by « · » (the `CHANNEL_FOOTER_ROWS` list in `src/news_monitor/telegram/card.py`). The addresses are shown only as text links. The block comes after the source link, so the Telegram preview is built from the article.
+- Tokens and keys come only from the environment, are masked in logs and never appear in reports.

@@ -6,6 +6,7 @@ import enum
 from datetime import UTC, datetime
 
 from sqlalchemy import (
+    BigInteger,
     DateTime,
     Index,
     Integer,
@@ -184,3 +185,54 @@ class NewsItem(Base):
 
     def __repr__(self) -> str:  # pragma: no cover - debugging helper
         return f"NewsItem(id={self.id}, source={self.source_id!r}, status={self.status})"
+
+
+class Moderator(Base):
+    """A user who may approve or reject cards but is not an administrator."""
+
+    __tablename__ = "moderators"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    display_name: Mapped[str] = mapped_column(String(256), default="", nullable=False)
+    added_by: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class CardMessage(Base):
+    """One delivered copy of a moderation card (one row per chat)."""
+
+    __tablename__ = "card_messages"
+    __table_args__ = (
+        UniqueConstraint("item_id", "chat_id", name="uq_card_messages_item_chat"),
+        Index("ix_card_messages_item_id", "item_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    chat_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    message_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+
+
+#: Actions recorded in the moderation event log.
+EVENT_APPROVE = "approve"
+EVENT_PUBLISH_NOW = "publish_now"
+EVENT_REJECT = "reject"
+EVENT_CANCEL = "cancel"
+
+
+class ModerationEvent(Base):
+    """Append-only log of won moderation decisions, the source of the daily report."""
+
+    __tablename__ = "moderation_events"
+    __table_args__ = (Index("ix_moderation_events_created_at", "created_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    item_id: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    user_name: Mapped[str] = mapped_column(String(256), default="", nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utcnow, nullable=False
+    )

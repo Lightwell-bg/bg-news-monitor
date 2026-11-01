@@ -35,6 +35,9 @@ MAX_PUBLISH_DELAY_MINUTES = 1440
 IMPORTANCE_THRESHOLD_KEY = "importance_threshold"
 PUBLISH_DELAY_MAX_KEY = "publish_delay_max_minutes"
 KNOWN_KEYS: tuple[str, ...] = (IMPORTANCE_THRESHOLD_KEY, PUBLISH_DELAY_MAX_KEY)
+#: Administrators who receive the daily report (a list of ids, not an int
+#: override, so it is kept out of KNOWN_KEYS and handled by its own methods).
+REPORT_RECIPIENTS_KEY = "report_recipient_ids"
 
 _HEADER = (
     "# Настройки, изменяемые администратором из Telegram.\n"
@@ -130,6 +133,55 @@ class RuntimeSettingsStore:
                 logger.warning("saved publish delay is invalid, using default")
         return overrides
 
+    def _load_recipients(self) -> list[int] | None:
+        """Saved report recipient ids, or None when nothing valid is saved.
+
+        An explicit empty list is a real value ("send to nobody"), distinct
+        from an absent key.
+        """
+        try:
+            data = yaml.safe_load(self._path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            return None
+        if not isinstance(data, dict) or REPORT_RECIPIENTS_KEY not in data:
+            return None
+        raw = data[REPORT_RECIPIENTS_KEY]
+        if not isinstance(raw, list):
+            logger.warning("saved report recipients are invalid, using default")
+            return None
+        ids: list[int] = []
+        for entry in raw:
+            if isinstance(entry, bool) or not isinstance(entry, int):
+                logger.warning("saved report recipients are invalid, using default")
+                return None
+            if entry not in ids:
+                ids.append(entry)
+        return ids
+
+    def get_report_recipients(self, settings: Settings) -> tuple[int, ...]:
+        """Administrators who receive the daily report.
+
+        Default (nothing saved) is the owner, the first administrator. Saved ids
+        that are no longer administrators are dropped silently.
+        """
+        saved = self._load_recipients()
+        if saved is None:
+            return settings.admin_ids[:1]
+        return tuple(user_id for user_id in saved if settings.is_admin(user_id))
+
+    def set_report_recipients(self, settings: Settings, ids: list[int] | tuple[int, ...]) -> tuple[int, ...]:
+        """Validate and persist the report recipients; an empty list means nobody."""
+        cleaned: list[int] = []
+        for user_id in ids:
+            if isinstance(user_id, bool) or not isinstance(user_id, int):
+                raise RuntimeSettingsError("Получатель должен быть числовым ID.")
+            if not settings.is_admin(user_id):
+                raise RuntimeSettingsError("Отчёт можно отправлять только администраторам.")
+            if user_id not in cleaned:
+                cleaned.append(user_id)
+        self._write(self.load(), recipients=cleaned)
+        return tuple(cleaned)
+
     def save_importance_threshold(self, value: str | int) -> int:
         """Validate and persist the importance threshold, returning it."""
         number = parse_importance_threshold(value)
@@ -161,8 +213,17 @@ class RuntimeSettingsStore:
             logger.info("runtime settings applied: %s", ", ".join(sorted(applied)))
         return applied
 
-    def _write(self, overrides: dict[str, int]) -> None:
-        document = {key: overrides[key] for key in KNOWN_KEYS if key in overrides}
+    def _write(
+        self, overrides: dict[str, int], recipients: list[int] | None = None
+    ) -> None:
+        """Write the whole file; saved report recipients survive other changes."""
+        document: dict[str, object] = {
+            key: overrides[key] for key in KNOWN_KEYS if key in overrides
+        }
+        if recipients is None:
+            recipients = self._load_recipients()
+        if recipients is not None:
+            document[REPORT_RECIPIENTS_KEY] = list(recipients)
         body = yaml.safe_dump(
             document, allow_unicode=True, sort_keys=False, default_flow_style=False
         )

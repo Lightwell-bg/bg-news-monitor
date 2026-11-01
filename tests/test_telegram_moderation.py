@@ -356,7 +356,8 @@ async def test_card_is_sent_only_to_configured_admins(
 
     assert delivered is not None
     assert delivered.status_enum is NewsStatus.AWAITING_APPROVAL
-    assert [message.chat_id for message in fake_bot.sent] == [ADMIN_ID]
+    # Every configured administrator now receives a copy of the card.
+    assert [message.chat_id for message in fake_bot.sent] == [ADMIN_ID, SECOND_ADMIN_ID]
     assert STRANGER_ID not in [message.chat_id for message in fake_bot.sent]
 
 

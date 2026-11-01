@@ -409,7 +409,8 @@ async def test_publication_job_publishes_due_items_and_refreshes_cards(
             calls.append("due")
             return ["result"]
 
-        async def fake_refresh(bot, results):
+        async def fake_refresh(bot, results, *, repository=None):
+            assert repository is application.repository
             calls.append((bot, results))
 
         monkeypatch.setattr(application.moderation, "publish_due", fake_publish_due)

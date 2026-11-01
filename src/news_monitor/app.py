@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 
 from aiogram import Bot
 
@@ -16,6 +17,7 @@ from news_monitor.config.sources import SourceConfig, load_sources
 from news_monitor.config.sources_store import SourcesStore
 from news_monitor.logging_config import setup_logging
 from news_monitor.pipeline import NewsPipeline
+from news_monitor.reports import send_daily_report
 from news_monitor.scheduler import PipelineScheduler
 from news_monitor.sources.fetcher import HttpHtmlFetcher
 from news_monitor.sources.registry import get_adapter
@@ -28,10 +30,13 @@ from news_monitor.telegram.bot import (
     refresh_cards_after_publication,
     register_admin_commands,
 )
+from news_monitor.telegram.access import AccessControl
 from news_monitor.telegram.moderation import ModerationService
+from news_monitor.timeutil import LOCAL_TZ
 from news_monitor.telegram.publisher import ChannelPublisher
 from news_monitor.telegram.admin_ui import PendingInputStore
 from news_monitor.telegram.sender import AdminCardSender
+from news_monitor.telegram.moderators_admin import ModeratorsAdminService
 from news_monitor.telegram.settings_admin import SettingsAdminService
 from news_monitor.telegram.sources_admin import ApplyResult, SourceAdminService
 
@@ -53,8 +58,10 @@ class Application:
     card_sender: AdminCardSender
     sources_store: SourcesStore
     runtime_store: RuntimeSettingsStore
+    access: AccessControl
     source_admin: SourceAdminService | None = None
     settings_admin: SettingsAdminService | None = None
+    moderators_admin: ModeratorsAdminService | None = None
 
     def build_pipeline(self, source: SourceConfig) -> NewsPipeline:
         """Create the pipeline of one source with the shared components."""
@@ -168,7 +175,11 @@ async def build_application(settings: Settings | None = None) -> Application:
     publisher = ChannelPublisher(
         bot, settings.telegram_channel_id, dry_run=settings.dry_run
     )
-    card_sender = AdminCardSender(bot, repository, settings.admin_ids, settings)
+    access = AccessControl(settings, repository)
+    await access.load()
+    card_sender = AdminCardSender(
+        bot, repository, settings.admin_ids, settings, access=access
+    )
 
     fetcher = HttpHtmlFetcher(
         user_agent=settings.user_agent,
@@ -193,6 +204,7 @@ async def build_application(settings: Settings | None = None) -> Application:
         repository=repository,
         publisher=publisher,
         settings=settings,
+        access=access,
         regenerator=regenerate,
     )
 
@@ -208,6 +220,7 @@ async def build_application(settings: Settings | None = None) -> Application:
         card_sender=card_sender,
         sources_store=SourcesStore(settings.sources_file),
         runtime_store=runtime_store,
+        access=access,
     )
     pending_inputs = PendingInputStore()
     application.source_admin = SourceAdminService(
@@ -219,6 +232,14 @@ async def build_application(settings: Settings | None = None) -> Application:
     application.settings_admin = SettingsAdminService(
         settings=settings,
         store=runtime_store,
+        pending=pending_inputs,
+    )
+    application.moderators_admin = ModeratorsAdminService(
+        access=access,
+        store=runtime_store,
+        repository=repository,
+        bot=bot,
+        settings=settings,
         pending=pending_inputs,
     )
 
@@ -244,9 +265,32 @@ def register_publication_job(application: Application) -> None:
 
     async def publish_due_job() -> None:
         results = await application.moderation.publish_due()
-        await refresh_cards_after_publication(application.bot, results)
+        await refresh_cards_after_publication(
+            application.bot, results, repository=application.repository
+        )
 
     application.scheduler.add_publication_job(publish_due_job)
+
+
+def register_daily_report_job(application: Application) -> None:
+    """Register the daily moderation report for the PREVIOUS local calendar day.
+
+    Recipients are read on every run, so a change made from the bot applies
+    without a restart.
+    """
+
+    async def daily_report_job() -> None:
+        yesterday = datetime.now(LOCAL_TZ).date() - timedelta(days=1)
+        recipients = application.runtime_store.get_report_recipients(application.settings)
+        if not recipients:
+            return
+        await send_daily_report(
+            application.bot, application.repository, recipients, yesterday
+        )
+
+    application.scheduler.add_daily_report_job(
+        daily_report_job, application.settings.daily_report_time
+    )
 
 
 async def run() -> None:
@@ -261,10 +305,13 @@ async def run() -> None:
         settings,
         application.source_admin,
         application.settings_admin,
+        application.access,
+        application.moderators_admin,
     )
 
     await register_admin_commands(bot, settings)
     register_publication_job(application)
+    register_daily_report_job(application)
     application.scheduler.start()
     logger.info(
         "started with %s source(s), dry_run=%s",

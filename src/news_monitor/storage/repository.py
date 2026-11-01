@@ -9,14 +9,18 @@ publication.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from news_monitor.normalization.url import normalize_url
 from news_monitor.storage.models import (
+    CardMessage,
+    ModerationEvent,
+    Moderator,
     NewsItem,
     NewsStatus,
     as_utc,
@@ -25,6 +29,16 @@ from news_monitor.storage.models import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionEvent:
+    """A moderation_event written in the same transaction as a won transition."""
+
+    user_id: int
+    user_name: str
+    action: str
+    at: datetime | None = None
 
 
 class DuplicateReason:
@@ -249,11 +263,13 @@ class NewsRepository:
         expected: NewsStatus,
         target: NewsStatus,
         values: dict[str, object] | None = None,
+        event: DecisionEvent | None = None,
     ) -> bool:
         """Apply a status change only if the row is still in the expected status.
 
         Returns True when this call performed the change and False when another
-        call already did, which keeps repeated callbacks idempotent.
+        call already did, which keeps repeated callbacks idempotent. A given
+        ``event`` is inserted in the same transaction, only for the winner.
         """
         payload: dict[str, object] = {
             "status": target.value,
@@ -266,8 +282,24 @@ class NewsRepository:
                 .where(NewsItem.id == item_id, NewsItem.status == expected.value)
                 .values(**payload)
             )
+            won = bool(result.rowcount)
+            if won and event is not None:
+                self._add_event(session, item_id, event)
             await session.commit()
-            return bool(result.rowcount)
+            return won
+
+    @staticmethod
+    def _add_event(session: AsyncSession, item_id: int, event: DecisionEvent) -> None:
+        """Queue a moderation_event row in the caller's transaction."""
+        session.add(
+            ModerationEvent(
+                item_id=item_id,
+                user_id=event.user_id,
+                user_name=(event.user_name or "")[:256],
+                action=event.action,
+                created_at=as_utc(event.at) if event.at is not None else utcnow(),
+            )
+        )
 
     async def approve(self, item_id: int, *, admin_id: int) -> bool:
         """Move AWAITING_APPROVAL to APPROVED exactly once."""
@@ -278,7 +310,9 @@ class NewsRepository:
             values={"decided_by": admin_id, "status_reason": ""},
         )
 
-    async def approve_now(self, item_id: int, *, admin_id: int) -> bool:
+    async def approve_now(
+        self, item_id: int, *, admin_id: int, event: DecisionEvent | None = None
+    ) -> bool:
         """Move AWAITING_APPROVAL or SCHEDULED to APPROVED in one atomic UPDATE."""
         async with self._session_factory() as session:
             result = await session.execute(
@@ -299,11 +333,19 @@ class NewsRepository:
                     updated_at=utcnow(),
                 )
             )
+            won = bool(result.rowcount)
+            if won and event is not None:
+                self._add_event(session, item_id, event)
             await session.commit()
-            return bool(result.rowcount)
+            return won
 
     async def schedule(
-        self, item_id: int, *, admin_id: int, scheduled_at: datetime
+        self,
+        item_id: int,
+        *,
+        admin_id: int,
+        scheduled_at: datetime,
+        event: DecisionEvent | None = None,
     ) -> bool:
         """Move AWAITING_APPROVAL to SCHEDULED exactly once."""
         return await self._conditional_update(
@@ -315,15 +357,19 @@ class NewsRepository:
                 "scheduled_at": as_utc(scheduled_at),
                 "status_reason": "",
             },
+            event=event,
         )
 
-    async def cancel_schedule(self, item_id: int) -> bool:
+    async def cancel_schedule(
+        self, item_id: int, *, event: DecisionEvent | None = None
+    ) -> bool:
         """Move SCHEDULED back to AWAITING_APPROVAL exactly once."""
         return await self._conditional_update(
             item_id,
             expected=NewsStatus.SCHEDULED,
             target=NewsStatus.AWAITING_APPROVAL,
             values={"scheduled_at": None, "decided_by": None},
+            event=event,
         )
 
     async def claim_due(self, now: datetime, *, limit: int = 10) -> list[int]:
@@ -377,13 +423,16 @@ class NewsRepository:
             )
             return list(result.scalars().all())
 
-    async def reject_by_admin(self, item_id: int, *, admin_id: int) -> bool:
+    async def reject_by_admin(
+        self, item_id: int, *, admin_id: int, event: DecisionEvent | None = None
+    ) -> bool:
         """Move AWAITING_APPROVAL to REJECTED_BY_ADMIN exactly once."""
         return await self._conditional_update(
             item_id,
             expected=NewsStatus.AWAITING_APPROVAL,
             target=NewsStatus.REJECTED_BY_ADMIN,
             values={"decided_by": admin_id, "status_reason": "rejected by admin"},
+            event=event,
         )
 
     async def mark_published(self, item_id: int, *, channel_message_id: int) -> bool:
@@ -412,6 +461,153 @@ class NewsRepository:
             target=NewsStatus.APPROVED,
             values={"status_reason": ""},
         )
+
+    async def count_by_status(self, status: NewsStatus) -> int:
+        """Number of items currently in the given status."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(func.count()).select_from(NewsItem).where(
+                    NewsItem.status == status.value
+                )
+            )
+            return int(result.scalar_one())
+
+    # ------------------------------------------------------------ moderators
+
+    async def add_moderator(
+        self, user_id: int, display_name: str = "", added_by: int | None = None
+    ) -> bool:
+        """Store a moderator. Returns False when the user already is one."""
+        async with self._session_factory() as session:
+            if await session.get(Moderator, user_id) is not None:
+                return False
+            session.add(
+                Moderator(
+                    user_id=user_id,
+                    display_name=display_name[:256],
+                    added_by=added_by,
+                )
+            )
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+                return False
+            return True
+
+    async def remove_moderator(self, user_id: int) -> bool:
+        """Delete a moderator. Returns False when there was none."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                delete(Moderator).where(Moderator.user_id == user_id)
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
+    async def list_moderators(self) -> list[Moderator]:
+        """Every moderator, oldest first."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(Moderator).order_by(Moderator.created_at, Moderator.user_id)
+            )
+            return list(result.scalars().all())
+
+    async def update_moderator_name(self, user_id: int, name: str) -> None:
+        """Refresh the stored display name of a moderator (no-op for strangers)."""
+        async with self._session_factory() as session:
+            await session.execute(
+                update(Moderator)
+                .where(Moderator.user_id == user_id)
+                .values(display_name=name[:256])
+            )
+            await session.commit()
+
+    # ---------------------------------------------------------- card copies
+
+    async def add_card_message(self, item_id: int, chat_id: int, message_id: int) -> None:
+        """Remember one delivered copy of a card; a duplicate chat is ignored."""
+        async with self._session_factory() as session:
+            session.add(
+                CardMessage(item_id=item_id, chat_id=chat_id, message_id=message_id)
+            )
+            try:
+                await session.commit()
+            except IntegrityError:
+                await session.rollback()
+
+    async def list_card_messages(self, item_id: int) -> list[tuple[int, int]]:
+        """Every (chat_id, message_id) holding a card of the item.
+
+        Includes the legacy single admin card stored on the item itself, so
+        cards sent before the per-copy table existed are still refreshed.
+        """
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(CardMessage.chat_id, CardMessage.message_id)
+                .where(CardMessage.item_id == item_id)
+                .order_by(CardMessage.id)
+            )
+            copies = [(int(chat), int(message)) for chat, message in result.all()]
+            item = await session.get(NewsItem, item_id)
+        if (
+            item is not None
+            and item.admin_chat_id is not None
+            and item.admin_message_id is not None
+        ):
+            legacy = (int(item.admin_chat_id), int(item.admin_message_id))
+            if legacy not in copies:
+                copies.insert(0, legacy)
+        return copies
+
+    # ------------------------------------------------------ moderation log
+
+    async def record_event(
+        self,
+        item_id: int,
+        user_id: int,
+        user_name: str,
+        action: str,
+        at: datetime | None = None,
+    ) -> None:
+        """Append one won decision to the moderation log."""
+        moment = as_utc(at) if at is not None else utcnow()
+        async with self._session_factory() as session:
+            session.add(
+                ModerationEvent(
+                    item_id=item_id,
+                    user_id=user_id,
+                    user_name=(user_name or "")[:256],
+                    action=action,
+                    created_at=moment,
+                )
+            )
+            await session.commit()
+
+    async def list_events(
+        self, start_utc: datetime, end_utc: datetime
+    ) -> list[ModerationEvent]:
+        """Events with start <= created_at < end, oldest first."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ModerationEvent)
+                .where(
+                    ModerationEvent.created_at >= as_utc(start_utc),
+                    ModerationEvent.created_at < as_utc(end_utc),
+                )
+                .order_by(ModerationEvent.created_at, ModerationEvent.id)
+            )
+            return list(result.scalars().all())
+
+    async def latest_event(self, item_id: int) -> ModerationEvent | None:
+        """The most recent logged decision of an item."""
+        async with self._session_factory() as session:
+            result = await session.execute(
+                select(ModerationEvent)
+                .where(ModerationEvent.item_id == item_id)
+                .order_by(ModerationEvent.id.desc())
+                .limit(1)
+            )
+            return result.scalar_one_or_none()
 
     async def update_draft(
         self,

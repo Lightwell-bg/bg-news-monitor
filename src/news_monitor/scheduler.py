@@ -8,15 +8,19 @@ from datetime import UTC, datetime
 
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 from news_monitor.config.settings import Settings
 from news_monitor.pipeline import NewsPipeline
+from news_monitor.timeutil import LOCAL_TZ
 
 logger = logging.getLogger(__name__)
 
 #: The single job that publishes due scheduled items.
 PUBLICATION_JOB_ID = "publisher:due"
+#: The single job that sends the daily moderation report.
+DAILY_REPORT_JOB_ID = "reports:daily"
 
 
 def effective_interval_minutes(pipeline: NewsPipeline, settings: Settings) -> int:
@@ -108,6 +112,32 @@ class PipelineScheduler:
             next_run_time=datetime.now(UTC),
         )
         logger.info("scheduled publication check every %s seconds", seconds)
+
+    def add_daily_report_job(
+        self, callback: Callable[[], Awaitable[None]], time_hhmm: str
+    ) -> None:
+        """Register the daily moderation report at HH:MM Europe/Sofia time."""
+        hour_text, minute_text = time_hhmm.split(":")
+        self._remove_existing(DAILY_REPORT_JOB_ID)
+
+        async def _job() -> None:
+            try:
+                await callback()
+            except Exception:  # noqa: BLE001 - one failure must not stop the loop
+                logger.exception("daily report run failed")
+
+        self._scheduler.add_job(
+            _job,
+            trigger=CronTrigger(
+                hour=int(hour_text), minute=int(minute_text), timezone=LOCAL_TZ
+            ),
+            id=DAILY_REPORT_JOB_ID,
+            replace_existing=True,
+            max_instances=1,
+            coalesce=True,
+            misfire_grace_time=3600,
+        )
+        logger.info("daily report scheduled at %s Europe/Sofia", time_hhmm)
 
     def start(self) -> None:
         """Start the scheduler."""

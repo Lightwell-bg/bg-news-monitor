@@ -7,7 +7,16 @@ from html import escape, unescape
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from news_monitor.storage.models import NewsItem, NewsStatus, as_utc
+from news_monitor.storage.models import (
+    EVENT_APPROVE,
+    EVENT_CANCEL,
+    EVENT_PUBLISH_NOW,
+    EVENT_REJECT,
+    ModerationEvent,
+    NewsItem,
+    NewsStatus,
+    as_utc,
+)
 from news_monitor.timeutil import format_local_time
 
 #: Telegram limit of visible message text after HTML parsing (UTF-16 units).
@@ -121,6 +130,46 @@ def build_keyboard(
             [InlineKeyboardButton(text=BUTTON_OPEN_SOURCE, url=item.url)],
         ]
     )
+
+
+def build_moderator_keyboard(
+    item: NewsItem, *, delay_max_minutes: int | None = None
+) -> InlineKeyboardMarkup:
+    """Buttons of a moderator: approve and reject only, no publish-now or regenerate."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=approve_label(delay_max_minutes),
+                    callback_data=build_callback_data(ACTION_APPROVE, item.id),
+                ),
+                InlineKeyboardButton(
+                    text=BUTTON_REJECT,
+                    callback_data=build_callback_data(ACTION_REJECT, item.id),
+                ),
+            ],
+            [InlineKeyboardButton(text=BUTTON_OPEN_SOURCE, url=item.url)],
+        ]
+    )
+
+
+def render_decision_line(event: ModerationEvent, item: NewsItem) -> str:
+    """One line under a card naming who decided what (HTML)."""
+    name = escape(event.user_name.strip()) if event.user_name else ""
+    if not name:
+        name = f"ID {event.user_id}"
+    if event.action == EVENT_APPROVE:
+        line = f"✅ Одобрил(а): {name}"
+        if item.scheduled_at is not None:
+            line += f", выйдет в {format_local_time(as_utc(item.scheduled_at))}"
+        return line
+    if event.action == EVENT_PUBLISH_NOW:
+        return f"⚡ Опубликовал(а) сразу: {name}"
+    if event.action == EVENT_REJECT:
+        return f"❌ Отклонил(а): {name}"
+    if event.action == EVENT_CANCEL:
+        return f"↩️ Публикацию отменил(а): {name}"
+    return ""
 
 
 def build_scheduled_keyboard(item: NewsItem) -> InlineKeyboardMarkup:

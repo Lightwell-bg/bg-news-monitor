@@ -32,6 +32,8 @@ from news_monitor.telegram.admin_ui import (
     CANCELLED_MESSAGE,
     DENIED_MESSAGE,
     MAX_INPUT_LENGTH,
+    MODERATORS_OPEN_ACTION,
+    MODERATORS_PREFIX,
     NOTICE_LIMIT,
     SETTINGS_OPEN_ACTION,
     SETTINGS_PREFIX,
@@ -163,6 +165,7 @@ def settings_keyboard(threshold: int, delay_max: int) -> InlineKeyboardMarkup:
         [_button("✏️ Ввести значение", ACTION_THRESHOLD_INPUT)],
         delay_steps,
         [_button("✏️ Ввести задержку", ACTION_DELAY_INPUT)],
+        [button(MODERATORS_PREFIX, "👥 Модераторы", MODERATORS_OPEN_ACTION)],
         [
             button(SOURCES_PREFIX, "⬅ К источникам", SOURCES_LIST_ACTION),
             _button("\U0001f504 Обновить", ACTION_OPEN),

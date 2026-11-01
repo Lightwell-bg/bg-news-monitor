@@ -10,6 +10,7 @@ from aiogram.filters import BaseFilter
 from aiogram.types import TelegramObject
 
 from news_monitor.config.settings import Settings
+from news_monitor.telegram.access import AccessControl
 
 
 class AdminOnly(BaseFilter):
@@ -25,3 +26,18 @@ class AdminOnly(BaseFilter):
     async def __call__(self, event: TelegramObject) -> bool:
         user = getattr(event, "from_user", None)
         return self.settings.is_admin(getattr(user, "id", None))
+
+
+class CanModerate(BaseFilter):
+    """Passes for administrators and for assigned moderators.
+
+    Used only by the moderation router; the source and settings panels stay
+    behind :class:`AdminOnly`.
+    """
+
+    def __init__(self, access: AccessControl) -> None:
+        self.access = access
+
+    async def __call__(self, event: TelegramObject) -> bool:
+        user = getattr(event, "from_user", None)
+        return self.access.can_moderate(getattr(user, "id", None))

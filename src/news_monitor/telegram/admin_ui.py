@@ -31,10 +31,12 @@ logger = logging.getLogger(__name__)
 #: simply not routed to it and the moderation router keeps every other update.
 SOURCES_PREFIX = "src"
 SETTINGS_PREFIX = "cfg"
+MODERATORS_PREFIX = "mod"
 
 #: Entry actions used by the cross-panel navigation buttons.
 SOURCES_LIST_ACTION = "list"
 SETTINGS_OPEN_ACTION = "open"
+MODERATORS_OPEN_ACTION = "open"
 
 #: Telegram refuses callback data longer than 64 bytes.
 CALLBACK_LIMIT = 64
@@ -207,6 +209,25 @@ class PendingInputStore:
         if user_id is None:
             return None
         return self._entries.pop(user_id, None)
+
+    def take(self, user_id: int | None, kind: str) -> PendingInput | None:
+        """Consume the awaited value synchronously, only if it is of ``kind``.
+
+        Exactly one concurrent caller gets the slot; the others get None. A
+        slot of another kind (another panel's prompt) is left untouched.
+        """
+        pending = self.get(user_id)
+        if pending is None or pending.kind != kind:
+            return None
+        self._entries.pop(user_id, None)  # type: ignore[arg-type]
+        return pending
+
+    def reopen(self, user_id: int | None, pending: PendingInput) -> bool:
+        """Put a taken slot back, unless the user has opened another one since."""
+        if user_id is None or self.get(user_id) is not None:
+            return False
+        self._entries[user_id] = pending
+        return True
 
     def _purge(self) -> None:
         now = self._clock()
